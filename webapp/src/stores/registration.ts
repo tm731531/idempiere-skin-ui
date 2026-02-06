@@ -16,7 +16,7 @@ import {
   searchPatients,
   createPatient,
   listDoctors,
-  getDoctorResource,
+  listDoctorResources,
   getNextQueueNumber,
   createRegistration,
   listTodayRegistrations,
@@ -171,15 +171,20 @@ export const useRegistrationStore = defineStore('registration', () => {
     error.value = null
 
     try {
-      doctors.value = await listDoctors()
+      // 並行載入醫師和資源（解決 N+1 問題）
+      const [doctorList, resourceMap] = await Promise.all([
+        listDoctors(),
+        listDoctorResources(),
+      ])
 
-      // 嘗試取得每個醫師的 Resource ID
-      for (const doctor of doctors.value) {
-        const resourceId = await getDoctorResource(doctor.name)
-        if (resourceId) {
-          doctor.resourceId = resourceId
+      // 用名稱匹配資源 ID
+      for (const doctor of doctorList) {
+        if (resourceMap[doctor.name]) {
+          doctor.resourceId = resourceMap[doctor.name]
         }
       }
+
+      doctors.value = doctorList
     } catch (e: any) {
       error.value = e.message || '載入醫師清單失敗'
     } finally {

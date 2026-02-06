@@ -10,6 +10,20 @@
 
 import { apiClient } from './client'
 
+// ========== Security Utils ==========
+
+/**
+ * Escape OData string to prevent injection
+ */
+function escapeODataString(value: string): string {
+  if (!value) return ''
+  // Escape single quotes and remove dangerous characters
+  return value
+    .replace(/'/g, "''")
+    .replace(/[<>{}|\\^~\[\]`]/g, '')
+    .trim()
+}
+
 // ========== Types ==========
 
 export interface Patient {
@@ -50,9 +64,10 @@ export type RegistrationStatus = 'WAITING' | 'CALLING' | 'CONSULTING' | 'COMPLET
  * 用身分證查詢病人
  */
 export async function findPatientByTaxId(taxId: string): Promise<Patient | null> {
+  const safeTaxId = escapeODataString(taxId)
   const response = await apiClient.get('/api/v1/models/C_BPartner', {
     params: {
-      '$filter': `TaxID eq '${taxId}' and IsCustomer eq true and IsActive eq true`,
+      '$filter': `TaxID eq '${safeTaxId}' and IsCustomer eq true and IsActive eq true`,
     },
   })
 
@@ -74,9 +89,10 @@ export async function findPatientByTaxId(taxId: string): Promise<Patient | null>
  * 搜尋病人（模糊搜尋）
  */
 export async function searchPatients(keyword: string): Promise<Patient[]> {
+  const safeKeyword = escapeODataString(keyword)
   const response = await apiClient.get('/api/v1/models/C_BPartner', {
     params: {
-      '$filter': `IsCustomer eq true and IsActive eq true and (contains(Name,'${keyword}') or contains(TaxID,'${keyword}'))`,
+      '$filter': `IsCustomer eq true and IsActive eq true and (contains(Name,'${safeKeyword}') or contains(TaxID,'${safeKeyword}'))`,
       '$top': 20,
     },
   })
@@ -148,15 +164,35 @@ export async function listDoctors(): Promise<Doctor[]> {
  * 查詢醫師對應的資源 ID
  */
 export async function getDoctorResource(doctorName: string): Promise<number | null> {
+  const safeName = escapeODataString(doctorName)
   const response = await apiClient.get('/api/v1/models/S_Resource', {
     params: {
-      '$filter': `contains(Name,'${doctorName}') and IsActive eq true`,
+      '$filter': `contains(Name,'${safeName}') and IsActive eq true`,
       '$top': 1,
     },
   })
 
   const records = response.data.records || []
   return records.length > 0 ? records[0].id : null
+}
+
+/**
+ * 批次查詢所有醫師資源（解決 N+1 問題）
+ */
+export async function listDoctorResources(): Promise<Record<string, number>> {
+  const response = await apiClient.get('/api/v1/models/S_Resource', {
+    params: {
+      '$filter': 'IsActive eq true',
+      '$select': 'S_Resource_ID,Name',
+    },
+  })
+
+  const result: Record<string, number> = {}
+  for (const r of response.data.records || []) {
+    // 用名稱作為 key（醫師名稱 → 資源 ID）
+    result[r.Name] = r.id
+  }
+  return result
 }
 
 // ========== Registration API ==========
@@ -197,6 +233,13 @@ export async function createRegistration(data: {
   const now = new Date()
   const endTime = new Date(now.getTime() + 30 * 60 * 1000) // 30 分鐘後
 
+  // 使用 JSON 格式儲存病人資訊（便於解析）
+  const description = JSON.stringify({
+    patientId: data.patientId,
+    patientName: data.patientName,
+    patientTaxId: data.patientTaxId,
+  })
+
   const response = await apiClient.post('/api/v1/models/S_ResourceAssignment', {
     'AD_Org_ID': data.orgId,
     'S_Resource_ID': data.resourceId,
@@ -205,7 +248,7 @@ export async function createRegistration(data: {
     'AssignDateTo': endTime.toISOString(),
     'Qty': 1,
     'IsConfirmed': false,
-    'Description': `${data.patientName} (${data.patientTaxId}) #${data.patientId}`,
+    'Description': description,
   })
 
   // 設定初始狀態為 WAITING
@@ -249,35 +292,85 @@ export async function listTodayRegistrations(resourceId?: number): Promise<Regis
 
   const records = response.data.records || []
 
-  // 取得所有狀態
-  const registrations: Registration[] = []
-  for (const r of records) {
-    const status = await getRegistrationStatus(r.id)
-    const desc = r.Description || ''
-    const patientMatch = desc.match(/^(.+?) \((.+?)\) #(\d+)$/)
+  // 批次取得所有狀態（解決 N+1 問題）
+  const ids = records.map((r: any) => r.id)
+  const statusMap = await getRegistrationStatuses(ids)
 
-    registrations.push({
+  // 解析病人資訊（使用 JSON 格式，向前相容舊格式）
+  function parseDescription(desc: string): { patientId: number; patientName: string; patientTaxId: string } {
+    if (!desc) return { patientId: 0, patientName: '', patientTaxId: '' }
+
+    // 嘗試 JSON 格式
+    try {
+      const data = JSON.parse(desc)
+      return {
+        patientId: data.patientId || 0,
+        patientName: data.patientName || '',
+        patientTaxId: data.patientTaxId || '',
+      }
+    } catch {
+      // 舊格式: "姓名 (身分證) #ID"
+      const match = desc.match(/^(.+?) \((.+?)\) #(\d+)$/)
+      if (match) {
+        return { patientId: parseInt(match[3]), patientName: match[1], patientTaxId: match[2] }
+      }
+      return { patientId: 0, patientName: desc, patientTaxId: '' }
+    }
+  }
+
+  return records.map((r: any) => {
+    const patientData = parseDescription(r.Description || '')
+    return {
       id: r.id,
       resourceId: r.S_Resource_ID?.id || r.S_Resource_ID,
       resourceName: r.S_Resource_ID?.identifier || '',
       queueNumber: r.Name || '',
-      patientId: patientMatch ? parseInt(patientMatch[3]) : 0,
-      patientName: patientMatch ? patientMatch[1] : desc,
-      patientTaxId: patientMatch ? patientMatch[2] : '',
+      patientId: patientData.patientId,
+      patientName: patientData.patientName,
+      patientTaxId: patientData.patientTaxId,
       assignDateFrom: r.AssignDateFrom,
       assignDateTo: r.AssignDateTo,
-      status: status,
+      status: statusMap[r.id] || 'WAITING',
       isConfirmed: r.IsConfirmed,
-      description: desc,
-    })
-  }
-
-  return registrations
+      description: r.Description || '',
+    }
+  })
 }
 
 // ========== Status API (using AD_SysConfig) ==========
 
 const STATUS_PREFIX = 'CLINIC_QUEUE_STATUS_'
+
+/**
+ * 批次查詢多筆掛號狀態（解決 N+1 問題）
+ */
+async function getRegistrationStatuses(ids: number[]): Promise<Record<number, RegistrationStatus>> {
+  if (ids.length === 0) return {}
+
+  // 建立 Name 清單查詢
+  const names = ids.map(id => `'${STATUS_PREFIX}${id}'`).join(',')
+
+  try {
+    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
+      params: {
+        '$filter': `Name in (${names})`,
+      },
+    })
+
+    const result: Record<number, RegistrationStatus> = {}
+    for (const r of response.data.records || []) {
+      const idMatch = r.Name.match(/(\d+)$/)
+      if (idMatch) {
+        const id = parseInt(idMatch[1], 10)
+        result[id] = r.Value as RegistrationStatus
+      }
+    }
+    return result
+  } catch {
+    // 如果查詢失敗，回傳空物件（全部當作 WAITING）
+    return {}
+  }
+}
 
 /**
  * 設定掛號狀態
