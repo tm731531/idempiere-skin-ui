@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRegistrationStore } from '@/stores/registration'
 
 const store = useRegistrationStore()

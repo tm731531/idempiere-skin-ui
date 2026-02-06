@@ -311,7 +311,7 @@ export async function listTodayRegistrations(resourceId?: number): Promise<Regis
     } catch {
       // 舊格式: "姓名 (身分證) #ID"
       const match = desc.match(/^(.+?) \((.+?)\) #(\d+)$/)
-      if (match) {
+      if (match && match[1] && match[2] && match[3]) {
         return { patientId: parseInt(match[3]), patientName: match[1], patientTaxId: match[2] }
       }
       return { patientId: 0, patientName: desc, patientTaxId: '' }

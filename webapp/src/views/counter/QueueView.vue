@@ -76,28 +76,6 @@ const availableDoctors = computed(() =>
   store.doctors.filter(d => d.resourceId)
 )
 
-// 狀態顏色
-function getStatusColor(status: string): string {
-  switch (status) {
-    case 'WAITING': return '#ff9800'
-    case 'CALLING': return '#f44336'
-    case 'CONSULTING': return '#2196f3'
-    case 'COMPLETED': return '#4caf50'
-    default: return '#999'
-  }
-}
-
-// 狀態文字
-function getStatusText(status: string): string {
-  switch (status) {
-    case 'WAITING': return '候診中'
-    case 'CALLING': return '叫號中'
-    case 'CONSULTING': return '看診中'
-    case 'COMPLETED': return '已完成'
-    case 'CANCELLED': return '已取消'
-    default: return status
-  }
-}
 </script>
 
 <template>

@@ -11,7 +11,6 @@ import {
   type Patient,
   type Doctor,
   type Registration,
-  type RegistrationStatus,
   findPatientByTaxId,
   searchPatients,
   createPatient,
@@ -346,9 +345,9 @@ export const useRegistrationStore = defineStore('registration', () => {
       .filter(r => !resourceId || r.resourceId === resourceId)
       .sort((a, b) => parseInt(a.queueNumber) - parseInt(b.queueNumber))
 
-    if (waiting.length === 0) return null
-
     const next = waiting[0]
+    if (!next) return null
+
     await call(next.id)
     return next
   }
