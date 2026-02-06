@@ -78,26 +78,29 @@ npm run type-check
 
 ## 部署說明
 
-**此 JAR 可部署到任何 iDempiere 12 伺服器**
+**WAB 目錄部署到 iDempiere 12**
 
 ```bash
-# 1. 編譯並打包
-./build.bat   # Windows
-./build.sh    # Linux/Mac
+# 1. 編譯並部署
+./build.sh              # 僅編譯
+./build.sh --deploy     # 編譯 + 部署到 iDempiere plugins/
 
-# 2. 複製 JAR 到 iDempiere
-cp org.idempiere.ui.clinic_1.0.0.jar /path/to/idempiere/plugins/
+# 2. 手動部署（如需要）
+cp -r target/org.idempiere.ui.clinic_1.0.0.qualifier /path/to/idempiere/plugins/
 
-# 3. 重啟 iDempiere 或在 OSGi Console 更新
+# 3. 在 bundles.info 註冊（首次部署時）
+echo "org.idempiere.ui.clinic,1.0.0.qualifier,plugins/org.idempiere.ui.clinic_1.0.0.qualifier/,4,false" \
+  >> /path/to/idempiere/configuration/org.eclipse.equinox.simpleconfigurator/bundles.info
+
+# 4. 重啟 iDempiere 或在 OSGi Console 更新
 telnet localhost 12612
-> update org.idempiere.ui.clinic
-> refresh org.idempiere.ui.clinic
+> update <bundle-id>
 
-# 4. 訪問（注意 hash mode URL 格式）
-http://your-server:8080/ui/#/
-http://your-server:8080/ui/#/login
-http://your-server:8080/ui/#/counter/register
-http://your-server:8080/ui/#/counter/queue
+# 5. 訪問（注意 hash mode URL 格式）
+https://your-server:8443/ui/#/
+https://your-server:8443/ui/#/login
+https://your-server:8443/ui/#/counter/register
+https://your-server:8443/ui/#/counter/queue
 ```
 
 **關鍵：** iDempiere 12 需要 `Jetty-Environment: ee8` header（已設定在 MANIFEST.MF）
@@ -458,7 +461,7 @@ Authorization: Bearer {token}
 - [x] 開發環境設定（Vue 專案骨架）
 - [x] OSGi WAB Bundle 結構（Jetty 12 + ee8）
 - [x] 部署測試通過（/ui/#/ 可訪問）
-- [ ] 功能開發（詳見 docs/pending-features/）
+- [x] 功能開發
   - [x] 登入頁面（骨架）
   - [x] 首頁選單（骨架）
   - [x] 掛號功能（feature/registration branch）
@@ -470,12 +473,26 @@ Authorization: Bearer {token}
     - [x] 候診/叫號/看診中清單
     - [x] 自動刷新（10秒）
     - [x] 狀態流轉（WAITING→CALLING→CONSULTING→COMPLETED）
+  - [x] 看診/開藥（feature/registration branch）
+    - [x] 醫生 API（api/doctor.ts）- 藥品搜尋、處方 CRUD
+    - [x] 醫生 Store（stores/doctor.ts）- 看診狀態管理
+    - [x] ConsultView - 看診畫面（診斷、開藥、藥品搜尋 modal）
+  - [x] 配藥功能（feature/registration branch）
+    - [x] 藥房 API（api/pharmacy.ts）- 配藥狀態、庫存查詢
+    - [x] 藥房 Store（stores/pharmacy.ts）- 配藥流程狀態
+    - [x] DispenseView - 配藥畫面（佇列、庫存狀態色碼）
+  - [x] 結帳功能（feature/registration branch）
+    - [x] 結帳 API（api/checkout.ts）- 結帳狀態管理
+    - [x] 結帳 Store（stores/checkout.ts）- 付款計算
+    - [x] CheckoutView - 結帳畫面（快速付款按鈕、找零）
+  - [x] 庫存功能（feature/registration branch）
+    - [x] 庫存 API（api/inventory.ts）- 庫存查詢、調撥、入庫
+    - [x] 庫存 Store（stores/inventory.ts）- 庫存狀態管理
+    - [x] StockView - 庫存查詢（搜尋、按藥品分組）
+    - [x] TransferView - 庫存調撥（藥品搜尋、儲位選擇）
+    - [x] ReceiveView - 採購入庫（採購單明細、收貨狀態）
   - [ ] 健保卡整合
-  - [ ] 看診/開藥
-  - [ ] 配藥功能
-  - [ ] 結帳功能
-  - [ ] 庫存功能
-- [ ] 測試
+- [ ] 整合測試（API 連通性驗證）
 - [ ] 正式部署
 
 ## Git 分支策略
@@ -487,4 +504,4 @@ Authorization: Bearer {token}
 | `feature/*` | 功能開發，完成後 merge 到 develop |
 
 目前分支：
-- `feature/registration` - 掛號+叫號功能（開發中）
+- `feature/registration` - 全模組開發（掛號→叫號→看診→配藥→結帳→庫存）
