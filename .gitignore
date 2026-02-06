@@ -1,0 +1,28 @@
+# Dependencies
+webapp/node_modules/
+osgi-bundle/lib/
+
+# Build outputs (generated from source)
+osgi-bundle/web/
+osgi-bundle/bin/
+*.jar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local env
+.env
+.env.local
+
+# Temp files
+*.tmp
+*.swp

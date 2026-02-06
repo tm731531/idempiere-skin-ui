@@ -1,0 +1,4 @@
+# 不要提交敏感資料
+config.env
+backups/
+*.log
