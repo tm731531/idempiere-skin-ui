@@ -5,6 +5,7 @@ osgi-bundle/lib/
 # Build outputs (generated from source)
 osgi-bundle/web/
 osgi-bundle/bin/
+target/
 *.jar
 
 # IDE
