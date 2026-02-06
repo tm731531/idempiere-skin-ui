@@ -1,54 +1,73 @@
 #!/bin/bash
 #
-# 建構 OSGi Bundle JAR
+# iDempiere Clinic UI - Build & Deploy script
+# Produces a WAB (Web Application Bundle) directory for iDempiere OSGi/Jetty
 #
-# 使用方式：
-#   ./build.sh
+# Usage:
+#   ./build.sh           # Build only
+#   ./build.sh --deploy  # Build + deploy to iDempiere plugins dir
 #
-# 輸出：
-#   org.idempiere.ui.clinic_1.0.0.jar
-#
-
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEBAPP_DIR="$SCRIPT_DIR/webapp"
 BUNDLE_DIR="$SCRIPT_DIR/osgi-bundle"
-OUTPUT_JAR="$SCRIPT_DIR/org.idempiere.ui.clinic_1.0.0.jar"
+BUNDLE_NAME="org.idempiere.ui.clinic_1.0.0.qualifier"
+IDEMPIERE_HOME="${IDEMPIERE_HOME:-/opt/idempiere-server/x86_64}"
+OUTPUT_DIR="$SCRIPT_DIR/target/$BUNDLE_NAME"
 
 echo "=========================================="
 echo "  iDempiere Clinic UI - Build Script"
 echo "=========================================="
 echo ""
 
-# Step 1: 編譯 Vue 專案
-echo "[1/3] 編譯 Vue 專案..."
+# Step 1: Build Vue frontend
+echo "[1/3] Building Vue frontend..."
 cd "$WEBAPP_DIR"
 npm run build
-echo "✅ Vue 編譯完成"
+echo "Vue build complete"
 echo ""
 
-# Step 2: 建立 JAR
-echo "[2/3] 建立 OSGi JAR..."
-cd "$BUNDLE_DIR"
-jar cfm "$OUTPUT_JAR" META-INF/MANIFEST.MF plugin.xml web
-echo "✅ JAR 建立完成"
+# Step 2: Assemble WAB directory
+echo "[2/3] Assembling WAB directory..."
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR/META-INF"
+mkdir -p "$OUTPUT_DIR/WEB-INF"
+
+# Copy MANIFEST.MF
+cp "$BUNDLE_DIR/META-INF/MANIFEST.MF" "$OUTPUT_DIR/META-INF/"
+
+# Copy WEB-INF/web.xml
+cp "$BUNDLE_DIR/WEB-INF/web.xml" "$OUTPUT_DIR/WEB-INF/"
+
+# Copy frontend build output as static files (at WAB root)
+cp -r "$BUNDLE_DIR/web/"* "$OUTPUT_DIR/"
+
+echo "WAB directory assembled: $OUTPUT_DIR"
 echo ""
 
-# Step 3: 顯示結果
-echo "[3/3] 建構完成！"
+# Step 3: Deploy (optional)
+if [ "$1" = "--deploy" ]; then
+    DEPLOY_DIR="$IDEMPIERE_HOME/plugins/$BUNDLE_NAME"
+    echo "[3/3] Deploying to $DEPLOY_DIR ..."
+    rm -rf "$DEPLOY_DIR"
+    cp -r "$OUTPUT_DIR" "$DEPLOY_DIR"
+    echo "Deployed successfully."
+    echo ""
+    echo "To activate, use OSGi console:"
+    echo "  telnet localhost 12612"
+    echo "  install reference:file:plugins/$BUNDLE_NAME"
+    echo "  start <bundle-id>"
+    echo ""
+    echo "Or if already installed, just: update <bundle-id>"
+else
+    echo "[3/3] Skipping deploy (use --deploy flag)"
+    echo ""
+    echo "To deploy manually:"
+    echo "  cp -r $OUTPUT_DIR $IDEMPIERE_HOME/plugins/"
+    echo "  # Then install/update via OSGi console"
+fi
+
 echo ""
-echo "輸出檔案: $OUTPUT_JAR"
-echo "檔案大小: $(ls -lh "$OUTPUT_JAR" | awk '{print $5}')"
-echo ""
+echo "URL: https://<host>:8443/ui/"
 echo "=========================================="
-echo "  部署說明"
-echo "=========================================="
-echo ""
-echo "1. 將 JAR 複製到 iDempiere plugins 目錄："
-echo "   cp $OUTPUT_JAR /path/to/idempiere/plugins/"
-echo ""
-echo "2. 重啟 iDempiere"
-echo ""
-echo "3. 訪問: http://your-server:8080/ui/"
-echo ""

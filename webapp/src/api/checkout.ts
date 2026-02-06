@@ -6,7 +6,7 @@
  */
 
 import { apiClient } from './client'
-import { loadPrescription, type Prescription } from './doctor'
+import { type Prescription } from './doctor'
 import { getDispenseStatus } from './pharmacy'
 
 export type CheckoutStatus = 'PENDING' | 'PAID'

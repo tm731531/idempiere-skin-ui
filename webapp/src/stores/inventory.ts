@@ -8,7 +8,6 @@ import { useAuthStore } from './auth'
 import {
   type StockItem,
   type Warehouse,
-  type TransferInput,
   listStock,
   listWarehouses,
   searchProducts,

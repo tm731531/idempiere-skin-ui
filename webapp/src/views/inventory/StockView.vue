@@ -21,8 +21,8 @@ const groupedStock = computed(() => {
     if (!groups[item.productId]) {
       groups[item.productId] = { productName: item.productName, locations: [], total: 0 }
     }
-    groups[item.productId].locations.push({ name: item.locatorName, qty: item.qtyOnHand })
-    groups[item.productId].total += item.qtyOnHand
+    groups[item.productId]!.locations.push({ name: item.locatorName, qty: item.qtyOnHand })
+    groups[item.productId]!.total += item.qtyOnHand
   }
 
   return Object.values(groups).sort((a, b) => a.productName.localeCompare(b.productName))

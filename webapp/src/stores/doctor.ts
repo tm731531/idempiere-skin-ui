@@ -11,7 +11,6 @@ import { useRegistrationStore } from './registration'
 import {
   type Medicine,
   type PrescriptionLine,
-  type Prescription,
   searchMedicines,
   listMedicines,
   savePrescription,
