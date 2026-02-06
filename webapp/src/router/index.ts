@@ -1,9 +1,9 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
-  // 重要：base 要與 vite.config.ts 的 base 一致
-  history: createWebHistory('/ui/'),
+  // 使用 hash mode，不需要 server 端支援 SPA routing
+  history: createWebHashHistory('/ui/'),
   routes: [
     {
       path: '/',
