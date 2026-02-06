@@ -101,16 +101,35 @@ http://your-server:8080/ui/
 
 ## 環境配置
 
-### 本地開發 API 代理
+### API 設定（Runtime 可改）
 
-開發時需要代理 API 到 iDempiere 伺服器：
+部署後可以修改 `config.json` 設定 API 位置：
+
+```bash
+# 找到部署的 config.json（在 JAR 內或解壓後）
+# 或直接放在 iDempiere 的 web 目錄
+
+# 編輯 config.json
+{
+  "apiBaseUrl": ""                           # 空字串 = 同一台伺服器
+  "apiBaseUrl": "http://api-server:8080"     # 跨伺服器 = 填完整 URL
+}
+```
+
+**部署情境：**
+| 情境 | apiBaseUrl 設定 |
+|------|-----------------|
+| UI 跟 API 同一台 | `""` (空字串) |
+| UI 跟 API 不同台 | `"http://api-server:8080"` |
+
+### 本地開發
+
+開發時用 Vite proxy 代理 API：
 
 ```bash
 # webapp/.env
 VITE_API_URL=http://your-idempiere:8080
 ```
-
-部署後不需要代理，因為前端跟 API 在同一台伺服器。
 
 ### iDempiere REST API 認證流程
 

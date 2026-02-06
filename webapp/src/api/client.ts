@@ -1,13 +1,23 @@
 import axios from 'axios'
+import { getApiBaseUrl } from '@/config'
 
 // 建立 axios instance
+// baseURL 在 config 載入後設定
 export const apiClient = axios.create({
-  // 開發時由 vite proxy 處理，生產時直接呼叫同 origin
-  baseURL: '',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
+})
+
+// 動態設定 baseURL（從 config.json 讀取）
+apiClient.interceptors.request.use((config) => {
+  // 每次請求時檢查 baseURL（支援 runtime 變更）
+  const apiBase = getApiBaseUrl()
+  if (apiBase) {
+    config.baseURL = apiBase
+  }
+  return config
 })
 
 // Request interceptor
