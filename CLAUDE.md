@@ -58,37 +58,66 @@ idempiere-new-skin-ui/
 ## 開發指令
 
 ```bash
-# 開發模式（會代理 API 到 48 環境）
-cd webapp && npm run dev
+# 1. 安裝依賴（首次）
+cd webapp && npm install
 
-# 編譯（輸出到 osgi-bundle/web/）
-cd webapp && npm run build
+# 2. 設定開發環境 API（可選）
+cp .env.example .env
+# 編輯 .env 設定 VITE_API_URL=http://your-idempiere:8080
 
-# 類型檢查
-cd webapp && npm run type-check
+# 3. 啟動開發模式
+npm run dev
+# 瀏覽器開啟 http://localhost:5173/ui/
+
+# 4. 編譯（輸出到 osgi-bundle/web/）
+npm run build
+
+# 5. 類型檢查
+npm run type-check
 ```
-
-**重要：** 編譯後的檔案會輸出到 `osgi-bundle/web/`，部署時只需要整個 `osgi-bundle/` 目錄。
 
 ## 部署說明
 
-將 `osgi-bundle/` 複製到 iDempiere 的 plugins 目錄，重啟即可透過 `/ui` 訪問。
+**此 JAR 可部署到任何 iDempiere 12 伺服器**
+
+```bash
+# 1. 編譯並打包
+./build.bat   # Windows
+./build.sh    # Linux/Mac
+
+# 2. 複製 JAR 到 iDempiere
+cp org.idempiere.ui.clinic_1.0.0.jar /path/to/idempiere/plugins/
+
+# 3. 重啟 iDempiere 或在 OSGi Console 更新
+telnet localhost 12612
+> update org.idempiere.ui.clinic
+> refresh org.idempiere.ui.clinic
+
+# 4. 訪問
+http://your-server:8080/ui/
+```
+
+**關鍵：** iDempiere 12 需要 `Jetty-Environment: ee8` header（已設定在 MANIFEST.MF）
 
 ## 環境配置
 
-### iDempiere 環境
+### 本地開發 API 代理
 
-| 環境 | IP | Client | 帳號 | 用途 | 狀態 |
-|------|-----|--------|------|------|------|
-| **測試** | 192.168.0.48:8080 | Yishou (1000000) | YishouA/YishouA | 測試專用，可隨意操作 | ✅ 可用 |
-| 參考 | 192.168.0.93:8080 | GardenWorld (11) | GardenAdmin/GardenAdmin | 範例資料參考 | ✅ 可用（勿修改） |
+開發時需要代理 API 到 iDempiere 伺服器：
 
-### 測試環境 (48) 認證流程
+```bash
+# webapp/.env
+VITE_API_URL=http://your-idempiere:8080
+```
+
+部署後不需要代理，因為前端跟 API 在同一台伺服器。
+
+### iDempiere REST API 認證流程
 
 ```bash
 # 1. 登入取得 Token
-POST http://192.168.0.48:8080/api/v1/auth/tokens
-{"userName": "YishouA", "password": "YishouA"}
+POST http://{server}:8080/api/v1/auth/tokens
+{"userName": "your_user", "password": "your_password"}
 
 # 2. 設定 Context
 PUT /api/v1/auth/tokens
@@ -284,21 +313,20 @@ Authorization: Bearer {token}
 - [x] 流程設計
 - [x] UI Wireframe
 - [x] 測試情境規劃
-- [x] 測試環境就緒（192.168.0.48:8080 Yishou）
 - [x] 備份還原腳本
-- [x] 建立測試資料（藥品、廠商、病人、員工）
 - [x] 開發環境設定（Vue 專案骨架）
-- [x] OSGi Bundle 結構（base: /ui）
-- [ ] 功能開發
-  - [x] 登入頁面
-  - [x] 首頁選單
-  - [x] 掛號頁面（基本框架）
+- [x] OSGi WAB Bundle 結構（Jetty 12 + ee8）
+- [x] 部署測試通過（/ui/ 可訪問）
+- [ ] 功能開發（詳見 docs/pending-features/）
+  - [x] 登入頁面（骨架）
+  - [x] 首頁選單（骨架）
+  - [ ] 健保卡整合
+  - [ ] API 串接
+  - [ ] 掛號功能
   - [ ] 叫號系統
-  - [ ] 看診頁面
-  - [ ] 配藥頁面
-  - [ ] 結帳頁面
-  - [ ] 庫存查詢
-  - [ ] 調撥功能
-  - [ ] 入庫功能
+  - [ ] 看診/開藥
+  - [ ] 配藥功能
+  - [ ] 結帳功能
+  - [ ] 庫存功能
 - [ ] 測試
-- [ ] 部署
+- [ ] 正式部署
