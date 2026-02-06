@@ -93,11 +93,117 @@ telnet localhost 12612
 > update org.idempiere.ui.clinic
 > refresh org.idempiere.ui.clinic
 
-# 4. 訪問
-http://your-server:8080/ui/
+# 4. 訪問（注意 hash mode URL 格式）
+http://your-server:8080/ui/#/
+http://your-server:8080/ui/#/login
+http://your-server:8080/ui/#/counter/register
+http://your-server:8080/ui/#/counter/queue
 ```
 
 **關鍵：** iDempiere 12 需要 `Jetty-Environment: ee8` header（已設定在 MANIFEST.MF）
+
+## ⚠️ 重要：OSGi WAB 部署注意事項
+
+### 1. JAR 結構必須正確
+
+靜態檔案要在 JAR **根目錄**，不是 `web/` 子目錄：
+
+```
+✅ 正確結構：
+org.idempiere.ui.clinic_1.0.0.jar
+├── META-INF/MANIFEST.MF
+├── plugin.xml
+├── index.html          ← 根目錄
+├── config.json         ← 根目錄
+└── assets/             ← 根目錄
+    └── *.js, *.css
+
+❌ 錯誤結構（會顯示目錄列表而非頁面）：
+org.idempiere.ui.clinic_1.0.0.jar
+├── META-INF/MANIFEST.MF
+├── plugin.xml
+└── web/                ← 多了一層！
+    ├── index.html
+    └── assets/
+```
+
+**打包指令：**
+```bash
+# 正確：用 -C web . 把 web 內容放到根目錄
+cd osgi-bundle && jar cfm "../xxx.jar" META-INF/MANIFEST.MF plugin.xml -C web .
+
+# 錯誤：會保留 web/ 目錄結構
+cd osgi-bundle && jar cfm "../xxx.jar" META-INF/MANIFEST.MF plugin.xml web
+```
+
+### 2. Vue Router 必須用 Hash Mode
+
+OSGi WAB 不支援 SPA history mode 路由，必須用 hash mode：
+
+```typescript
+// ✅ 正確：hash mode（URL: /ui/#/counter/register）
+import { createRouter, createWebHashHistory } from 'vue-router'
+const router = createRouter({
+  history: createWebHashHistory('/ui/'),
+  // ...
+})
+
+// ❌ 錯誤：history mode（會 404）
+import { createRouter, createWebHistory } from 'vue-router'
+const router = createRouter({
+  history: createWebHistory('/ui/'),
+  // ...
+})
+```
+
+### 3. Jetty 12 環境設定
+
+iDempiere 12 使用 Jetty 12，必須在 MANIFEST.MF 加上：
+
+```
+Web-ContextPath: /ui
+Jetty-Environment: ee8
+```
+
+沒有 `Jetty-Environment: ee8` 會導致 bundle 被 Jetty 忽略（ACTIVE 但 404）。
+
+### 4. API 安全：OData Filter 注入防護
+
+所有使用者輸入必須 escape 後才能放入 OData filter：
+
+```typescript
+// ✅ 正確
+function escapeODataString(value: string): string {
+  if (!value) return ''
+  return value
+    .replace(/'/g, "''")
+    .replace(/[<>{}|\\^~\[\]`]/g, '')
+    .trim()
+}
+
+const safeTaxId = escapeODataString(taxId)
+const filter = `TaxID eq '${safeTaxId}'`
+
+// ❌ 錯誤：直接插入使用者輸入
+const filter = `TaxID eq '${taxId}'`  // SQL Injection 風險！
+```
+
+### 5. 避免 N+1 查詢問題
+
+批次查詢，不要在迴圈裡打 API：
+
+```typescript
+// ✅ 正確：一次查詢所有
+const [doctors, resources] = await Promise.all([
+  listDoctors(),
+  listDoctorResources(),  // 回傳 Record<name, id>
+])
+
+// ❌ 錯誤：N+1 問題
+for (const doctor of doctors) {
+  doctor.resourceId = await getDoctorResource(doctor.name)  // 每個都打一次 API！
+}
+```
 
 ## 環境配置
 
@@ -130,6 +236,22 @@ http://your-server:8080/ui/
 # webapp/.env
 VITE_API_URL=http://your-idempiere:8080
 ```
+
+### iDempiere 內建表對應
+
+優先使用 iDempiere 內建表，減少客製化：
+
+| 業務概念 | iDempiere 表 | 條件/欄位 |
+|---------|-------------|----------|
+| 病人 | C_BPartner | IsCustomer=true |
+| 醫師 | AD_User | IsSalesRep=true |
+| 醫師資源 | S_Resource | 對應醫師名稱 |
+| 掛號/預約 | S_ResourceAssignment | S_Resource_ID + 時間 |
+| 掛號狀態 | AD_SysConfig | Name=CLINIC_QUEUE_STATUS_{id} |
+| 藥品 | M_Product | - |
+| 庫存 | M_StorageOnHand | - |
+
+**掛號狀態值：** WAITING → CALLING → CONSULTING → COMPLETED / CANCELLED
 
 ### iDempiere REST API 認證流程
 
@@ -335,17 +457,34 @@ Authorization: Bearer {token}
 - [x] 備份還原腳本
 - [x] 開發環境設定（Vue 專案骨架）
 - [x] OSGi WAB Bundle 結構（Jetty 12 + ee8）
-- [x] 部署測試通過（/ui/ 可訪問）
+- [x] 部署測試通過（/ui/#/ 可訪問）
 - [ ] 功能開發（詳見 docs/pending-features/）
   - [x] 登入頁面（骨架）
   - [x] 首頁選單（骨架）
+  - [x] 掛號功能（feature/registration branch）
+    - [x] 病人查詢/新增（C_BPartner）
+    - [x] 醫師清單（AD_User + S_Resource）
+    - [x] 掛號建立（S_ResourceAssignment）
+    - [x] 狀態管理（AD_SysConfig）
+  - [x] 叫號系統（feature/registration branch）
+    - [x] 候診/叫號/看診中清單
+    - [x] 自動刷新（10秒）
+    - [x] 狀態流轉（WAITING→CALLING→CONSULTING→COMPLETED）
   - [ ] 健保卡整合
-  - [ ] API 串接
-  - [ ] 掛號功能
-  - [ ] 叫號系統
   - [ ] 看診/開藥
   - [ ] 配藥功能
   - [ ] 結帳功能
   - [ ] 庫存功能
 - [ ] 測試
 - [ ] 正式部署
+
+## Git 分支策略
+
+| 分支 | 用途 |
+|------|------|
+| `main` | 穩定版本，可直接部署 |
+| `develop` | 開發整合，功能確認 OK 後 merge |
+| `feature/*` | 功能開發，完成後 merge 到 develop |
+
+目前分支：
+- `feature/registration` - 掛號+叫號功能（開發中）
