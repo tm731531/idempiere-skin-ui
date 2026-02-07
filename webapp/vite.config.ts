@@ -59,5 +59,12 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+
+    // @ts-expect-error vitest config
+    test: {
+      environment: 'happy-dom',
+      globals: true,
+      include: ['src/**/*.{test,spec}.{js,ts}'],
+    },
   }
 })
