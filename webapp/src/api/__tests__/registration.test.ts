@@ -92,7 +92,7 @@ describe('searchPatients', () => {
 })
 
 describe('createPatient', () => {
-  it('creates patient and returns mapped result', async () => {
+  it('creates patient with all required fields', async () => {
     mockPost.mockResolvedValue({ data: { id: 99 } })
 
     const result = await createPatient({
@@ -110,7 +110,14 @@ describe('createPatient', () => {
       'AD_Org_ID': 11,
       'Name': 'Jane',
       'TaxID': 'B987654321',
+      'C_BP_Group_ID': 103,
       'IsCustomer': true,
+      'IsVendor': false,
+      'IsEmployee': false,
+      'IsSalesRep': false,
+      'IsSummary': false,
+      'IsOneTime': false,
+      'SendEMail': false,
     }))
   })
 })

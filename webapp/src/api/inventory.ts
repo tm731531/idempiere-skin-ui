@@ -134,6 +134,7 @@ export async function createTransfer(input: TransferInput): Promise<number> {
   // Create movement header
   const headerResponse = await apiClient.post('/api/v1/models/M_Movement', {
     'AD_Org_ID': input.orgId,
+    'C_DocType_ID': 143, // Material Movement
     'MovementDate': new Date().toISOString().slice(0, 10),
     'Description': input.description || 'Clinic transfer',
   })
@@ -147,14 +148,16 @@ export async function createTransfer(input: TransferInput): Promise<number> {
     'M_Product_ID': input.productId,
     'M_Locator_ID': input.fromLocatorId,
     'M_LocatorTo_ID': input.toLocatorId,
+    'C_UOM_ID': 100, // Each
     'MovementQty': input.quantity,
+    'QtyEntered': input.quantity,
+    'TargetQty': 0,
   })
 
   // Complete the movement
   try {
     await apiClient.put(`/api/v1/models/M_Movement/${movementId}`, {
       'DocAction': 'CO',
-      'DocStatus': 'CO',
     })
   } catch {
     // DocAction might not work via REST, movement is still created
@@ -216,10 +219,39 @@ export async function createReceipt(
   orgId: number,
   warehouseId: number
 ): Promise<number> {
+  // Look up C_BPartner_Location_ID from the order
+  const orderResponse = await apiClient.get(`/api/v1/models/C_Order/${orderId}`, {
+    params: { '$select': 'C_BPartner_Location_ID' },
+  })
+  let bpLocationId = orderResponse.data.C_BPartner_Location_ID?.id || orderResponse.data.C_BPartner_Location_ID
+
+  // Fallback: look up vendor's first active location
+  if (!bpLocationId) {
+    const locResponse = await apiClient.get('/api/v1/models/C_BPartner_Location', {
+      params: {
+        '$filter': `C_BPartner_ID eq ${vendorId} and IsActive eq true`,
+        '$top': 1,
+      },
+    })
+    const locRecords = locResponse.data.records || []
+    if (locRecords.length > 0) bpLocationId = locRecords[0].id
+  }
+
+  // Look up default locator for the warehouse
+  const locatorResponse = await apiClient.get('/api/v1/models/M_Locator', {
+    params: {
+      '$filter': `M_Warehouse_ID eq ${warehouseId} and IsDefault eq true and IsActive eq true`,
+      '$top': 1,
+    },
+  })
+  const defaultLocatorId = locatorResponse.data.records?.[0]?.id || 0
+
   // Create M_InOut header (Material Receipt)
   const headerResponse = await apiClient.post('/api/v1/models/M_InOut', {
     'AD_Org_ID': orgId,
     'C_BPartner_ID': vendorId,
+    'C_BPartner_Location_ID': bpLocationId,
+    'C_DocType_ID': 122, // MM Receipt
     'C_Order_ID': orderId,
     'M_Warehouse_ID': warehouseId,
     'MovementDate': new Date().toISOString().slice(0, 10),
@@ -237,8 +269,11 @@ export async function createReceipt(
       'M_InOut_ID': inOutId,
       'C_OrderLine_ID': line.orderLineId,
       'M_Product_ID': line.productId,
+      'M_Locator_ID': defaultLocatorId,
+      'M_AttributeSetInstance_ID': 0,
+      'C_UOM_ID': 100, // Each
       'MovementQty': line.qtyReceived,
-      'M_Locator_ID': 0, // Default locator
+      'QtyEntered': line.qtyReceived,
     })
   }
 
@@ -246,7 +281,6 @@ export async function createReceipt(
   try {
     await apiClient.put(`/api/v1/models/M_InOut/${inOutId}`, {
       'DocAction': 'CO',
-      'DocStatus': 'CO',
     })
   } catch {
     // DocAction may not work via REST

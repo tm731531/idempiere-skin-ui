@@ -127,7 +127,14 @@ export async function createPatient(data: {
     'Name': data.name,
     'TaxID': data.taxId,
     'Phone': data.phone || '',
+    'C_BP_Group_ID': 103, // Standard Customers (default)
     'IsCustomer': true,
+    'IsVendor': false,
+    'IsEmployee': false,
+    'IsSalesRep': false,
+    'IsSummary': false,
+    'IsOneTime': false,
+    'SendEMail': false,
     'IsActive': true,
   })
 
