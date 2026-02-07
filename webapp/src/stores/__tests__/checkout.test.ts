@@ -120,7 +120,7 @@ describe('Checkout Store', () => {
       const store = useCheckoutStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       const item = { assignmentId: 100, prescription: {} } as any
       store.checkoutItems = [item, { assignmentId: 101 } as any]

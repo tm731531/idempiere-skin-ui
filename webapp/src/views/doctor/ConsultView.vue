@@ -3,6 +3,7 @@ import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useDoctorStore } from '@/stores/doctor'
 import { useRegistrationStore } from '@/stores/registration'
 import { TAG_DISPLAY } from '@/api/registration'
+import type { Prescription, PrescriptionTemplate } from '@/api/doctor'
 
 const doctorStore = useDoctorStore()
 const regStore = useRegistrationStore()
@@ -10,6 +11,12 @@ const regStore = useRegistrationStore()
 // Medicine search
 const searchKeyword = ref('')
 const showMedicineSearch = ref(false)
+
+// History & Template modals
+const showHistoryModal = ref(false)
+const showTemplateModal = ref(false)
+const showSaveTemplateInput = ref(false)
+const newTemplateName = ref('')
 
 // Edit line modal
 const editingIndex = ref<number | null>(null)
@@ -24,6 +31,8 @@ onMounted(async () => {
   await regStore.loadDoctors()
   await regStore.loadTodayRegistrations()
   await doctorStore.loadMedicines()
+  doctorStore.loadHistory()
+  doctorStore.loadTemplateList()
   loadConsultingTags()
 
   refreshInterval = window.setInterval(() => {
@@ -124,6 +133,38 @@ async function saveDraft() {
 async function callNext() {
   await regStore.callNext()
 }
+
+// History & Templates
+const patientHistory = computed(() => {
+  if (!doctorStore.currentPatientName) return doctorStore.prescriptionHistory
+  return doctorStore.prescriptionHistory.filter(
+    p => p.patientName === doctorStore.currentPatientName && p.status === 'COMPLETED'
+  )
+})
+
+function applyHistory(prescription: Prescription) {
+  doctorStore.applyHistoryPrescription(prescription)
+  showHistoryModal.value = false
+}
+
+function applyTemplate(template: PrescriptionTemplate) {
+  doctorStore.applyTemplate(template)
+  showTemplateModal.value = false
+}
+
+async function saveAsTemplate() {
+  if (!newTemplateName.value.trim()) return
+  const success = await doctorStore.saveCurrentAsTemplate(newTemplateName.value.trim())
+  if (success) {
+    newTemplateName.value = ''
+    showSaveTemplateInput.value = false
+  }
+}
+
+async function deleteTemplate(id: string) {
+  if (!confirm('確定刪除此範本？')) return
+  await doctorStore.removeTemplate(id)
+}
 </script>
 
 <template>
@@ -206,7 +247,7 @@ async function callNext() {
 
         <!-- Prescription lines -->
         <div v-if="doctorStore.prescriptionLines.length === 0" class="empty-prescription">
-          尚未開藥，請點擊下方「新增藥品」
+          尚未開藥。點擊下方「新增藥品」搜尋並添加藥品到處方。
         </div>
         <div v-else class="prescription-list">
           <div v-for="(line, i) in doctorStore.prescriptionLines" :key="i" class="prescription-item">
@@ -247,10 +288,30 @@ async function callNext() {
           </div>
         </div>
 
-        <!-- Add medicine button -->
-        <button class="btn btn-add" @click="showMedicineSearch = true">
-          + 新增藥品
-        </button>
+        <!-- Add medicine / history / template buttons -->
+        <div class="add-buttons">
+          <button class="btn btn-add" @click="showMedicineSearch = true">
+            + 新增藥品
+          </button>
+          <button class="btn btn-add btn-history" @click="showHistoryModal = true">
+            套用歷史處方
+          </button>
+          <button class="btn btn-add btn-template" @click="showTemplateModal = true">
+            套用範本
+          </button>
+        </div>
+
+        <!-- Save as template -->
+        <div v-if="doctorStore.prescriptionLines.length > 0" class="save-template-area">
+          <div v-if="!showSaveTemplateInput">
+            <button class="btn btn-text btn-sm" @click="showSaveTemplateInput = true">儲存為範本</button>
+          </div>
+          <div v-else class="save-template-form">
+            <input v-model="newTemplateName" type="text" placeholder="範本名稱" class="input input-sm" @keydown.enter="saveAsTemplate" />
+            <button class="btn btn-sm btn-primary" @click="saveAsTemplate">儲存</button>
+            <button class="btn btn-sm" @click="showSaveTemplateInput = false">取消</button>
+          </div>
+        </div>
       </div>
 
       <!-- Action buttons -->
@@ -311,6 +372,65 @@ async function callNext() {
                 <div class="med-name">{{ med.name }}</div>
                 <div class="med-code">{{ med.value }}</div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- History modal -->
+    <div v-if="showHistoryModal" class="modal-overlay" @click.self="showHistoryModal = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>歷史處方</h3>
+          <button class="btn btn-text" @click="showHistoryModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="doctorStore.isLoadingHistory" class="loading">載入中...</div>
+          <div v-else-if="patientHistory.length === 0" class="empty">沒有歷史處方紀錄</div>
+          <div v-else class="history-list">
+            <div
+              v-for="rx in patientHistory"
+              :key="rx.assignmentId"
+              class="history-item"
+              @click="applyHistory(rx)"
+            >
+              <div class="history-header">
+                <span class="history-date">{{ rx.createdAt ? new Date(rx.createdAt).toLocaleDateString() : '' }}</span>
+                <span class="history-patient">{{ rx.patientName }}</span>
+              </div>
+              <div v-if="rx.diagnosis" class="history-diagnosis">{{ rx.diagnosis }}</div>
+              <div class="history-meds">
+                {{ rx.lines.map(l => l.productName).join('、') }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Template modal -->
+    <div v-if="showTemplateModal" class="modal-overlay" @click.self="showTemplateModal = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>處方範本</h3>
+          <button class="btn btn-text" @click="showTemplateModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="doctorStore.templates.length === 0" class="empty">尚無範本，可在開藥後點擊「儲存為範本」建立。</div>
+          <div v-else class="template-list">
+            <div
+              v-for="tpl in doctorStore.templates"
+              :key="tpl.id"
+              class="template-item"
+            >
+              <div class="template-content" @click="applyTemplate(tpl)">
+                <div class="template-name">{{ tpl.name }}</div>
+                <div class="template-meds">
+                  {{ tpl.lines.map(l => l.productName).join('、') }}
+                </div>
+              </div>
+              <button class="btn btn-text btn-remove" @click.stop="deleteTemplate(tpl.id)">✕</button>
             </div>
           </div>
         </div>
@@ -567,4 +687,33 @@ async function callNext() {
 .loading, .empty { text-align: center; padding: 2rem; color: #666; }
 .error-message { background: #ffebee; color: #c62828; padding: 1rem; border-radius: 0.5rem; margin-top: 0.5rem; }
 .tag-badge { font-size: 0.875rem; margin-left: 0.25rem; }
+
+/* Add buttons row */
+.add-buttons { display: flex; flex-direction: column; gap: 0.5rem; }
+.btn-history { border-color: #1976D2; color: #1976D2; }
+.btn-history:active { background: #e3f2fd; }
+.btn-template { border-color: #F57C00; color: #F57C00; }
+.btn-template:active { background: #fff3e0; }
+
+/* Save template */
+.save-template-area { margin-top: 0.5rem; }
+.save-template-form { display: flex; gap: 0.5rem; align-items: center; }
+.save-template-form .input-sm { flex: 1; padding: 0.375rem 0.5rem; min-height: auto; }
+
+/* History items */
+.history-list, .template-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.history-item { padding: 0.75rem; border: 1px solid #eee; border-radius: 0.5rem; cursor: pointer; }
+.history-item:active { background: #f5f5f5; }
+.history-header { display: flex; justify-content: space-between; margin-bottom: 0.25rem; }
+.history-date { font-size: 0.75rem; color: #999; }
+.history-patient { font-size: 0.75rem; color: #666; }
+.history-diagnosis { font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem; }
+.history-meds { font-size: 0.75rem; color: #666; }
+
+/* Template items */
+.template-item { display: flex; align-items: center; border: 1px solid #eee; border-radius: 0.5rem; }
+.template-content { flex: 1; padding: 0.75rem; cursor: pointer; }
+.template-content:active { background: #f5f5f5; }
+.template-name { font-weight: 600; margin-bottom: 0.25rem; }
+.template-meds { font-size: 0.75rem; color: #666; }
 </style>

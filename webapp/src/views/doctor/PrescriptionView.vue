@@ -72,6 +72,11 @@ async function saveAsTemplate() {
 
 <template>
   <div class="prescription-view">
+    <!-- Hint banner -->
+    <div class="hint-banner">
+      處方在「看診」頁面建立。請先到看診頁面選擇病人開始看診，即可在看診中開藥。此頁面用於查看歷史處方和管理常用處方範本。
+    </div>
+
     <!-- Tab bar -->
     <div class="tab-bar">
       <button
@@ -238,6 +243,16 @@ async function saveAsTemplate() {
 .prescription-view {
   max-width: 800px;
   margin: 0 auto;
+}
+
+.hint-banner {
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
 }
 
 /* ===== Tab bar ===== */

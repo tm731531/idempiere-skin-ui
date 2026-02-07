@@ -188,7 +188,7 @@ export const useDoctorStore = defineStore('doctor', () => {
     }
 
     if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
-      error.value = 'Organization not set'
+      error.value = '請先登入以設定組織環境'
       return false
     }
 
@@ -256,7 +256,7 @@ export const useDoctorStore = defineStore('doctor', () => {
 
   async function saveCurrentAsTemplate(name: string): Promise<boolean> {
     if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
-      error.value = 'Organization not set'
+      error.value = '請先登入以設定組織環境'
       return false
     }
     if (prescriptionLines.value.length === 0) {
@@ -286,6 +286,19 @@ export const useDoctorStore = defineStore('doctor', () => {
   function applyTemplate(template: PrescriptionTemplate): void {
     prescriptionLines.value = template.lines.map(line => ({ ...line }))
     totalDays.value = template.totalDays
+  }
+
+  /**
+   * Apply a historical prescription — appends lines (does not replace)
+   */
+  function applyHistoryPrescription(prescription: Prescription): void {
+    for (const line of prescription.lines) {
+      prescriptionLines.value.push({
+        ...line,
+        days: totalDays.value,
+        totalQuantity: calculateTotalQuantity(line.dosage, line.frequency, totalDays.value),
+      })
+    }
   }
 
   /**
@@ -345,5 +358,6 @@ export const useDoctorStore = defineStore('doctor', () => {
     saveCurrentAsTemplate,
     removeTemplate,
     applyTemplate,
+    applyHistoryPrescription,
   }
 })

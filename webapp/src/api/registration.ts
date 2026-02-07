@@ -9,6 +9,7 @@
  */
 
 import { apiClient } from './client'
+import { lookupCustomerGroupId } from './lookup'
 
 // ========== Security Utils ==========
 
@@ -121,13 +122,15 @@ export async function createPatient(data: {
   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
   const value = `P${dateStr}${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`
 
+  const bpGroupId = await lookupCustomerGroupId()
+
   const response = await apiClient.post('/api/v1/models/C_BPartner', {
     'AD_Org_ID': data.orgId,
     'Value': value,
     'Name': data.name,
     'TaxID': data.taxId,
     'Phone': data.phone || '',
-    'C_BP_Group_ID': 103, // Standard Customers (default)
+    'C_BP_Group_ID': bpGroupId,
     'IsCustomer': true,
     'IsVendor': false,
     'IsEmployee': false,

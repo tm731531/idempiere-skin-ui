@@ -13,6 +13,10 @@ const router = useRouter()
       <router-link to="/inventory/stock" class="nav-item">庫存</router-link>
       <router-link to="/inventory/transfer" class="nav-item">調撥</router-link>
       <router-link to="/inventory/receive" class="nav-item">入庫</router-link>
+      <router-link to="/inventory/count" class="nav-item">盤點</router-link>
+      <router-link to="/inventory/product" class="nav-item">產品</router-link>
+      <router-link to="/inventory/history" class="nav-item">紀錄</router-link>
+      <router-link to="/inventory/purchase" class="nav-item">採購</router-link>
     </nav>
     <main class="module-main">
       <router-view />
@@ -56,12 +60,14 @@ const router = useRouter()
   background: white;
   display: flex;
   border-bottom: 1px solid #eee;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .nav-item {
-  flex: 1;
+  flex: 0 0 auto;
   text-align: center;
-  padding: 1rem;
+  padding: 0.75rem 1rem;
   text-decoration: none;
   color: #666;
   border-bottom: 2px solid transparent;
@@ -69,6 +75,8 @@ const router = useRouter()
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
+  font-size: 0.875rem;
 }
 
 .nav-item.router-link-active {

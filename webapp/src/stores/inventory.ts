@@ -9,15 +9,22 @@ import {
   type StockItem,
   type Warehouse,
   type ReceiptLine,
+  type BatchTransferLine,
   listStock,
   listWarehouses,
   searchProducts,
   createTransfer,
+  createBatchTransfer,
   listPurchaseOrders,
   getOrderLines,
   createReceipt,
   getOrderVendorId,
 } from '@/api/inventory'
+
+/** Check if auth context has a valid field (zero is valid!) */
+function hasContextField(context: any, field: string): boolean {
+  return context != null && context[field] !== null && context[field] !== undefined
+}
 
 export const useInventoryStore = defineStore('inventory', () => {
   const authStore = useAuthStore()
@@ -30,6 +37,9 @@ export const useInventoryStore = defineStore('inventory', () => {
   // Transfer
   const transferProducts = ref<{ id: number; name: string; value: string }[]>([])
   const isTransferring = ref(false)
+
+  // Batch transfer
+  const batchLines = ref<BatchTransferLine[]>([])
 
   // Receive
   const purchaseOrders = ref<any[]>([])
@@ -75,8 +85,8 @@ export const useInventoryStore = defineStore('inventory', () => {
     toLocatorId: number,
     quantity: number
   ): Promise<boolean> {
-    if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
-      error.value = 'Organization not set'
+    if (!hasContextField(authStore.context, 'organizationId')) {
+      error.value = '請先登入以設定組織環境'
       return false
     }
 
@@ -95,6 +105,58 @@ export const useInventoryStore = defineStore('inventory', () => {
       return true
     } catch (e: any) {
       error.value = e.message || 'Transfer failed'
+      return false
+    } finally {
+      isTransferring.value = false
+    }
+  }
+
+  // Batch transfer actions
+  function addBatchLine(product: { id: number; name: string }, quantity: number): void {
+    const existing = batchLines.value.find(l => l.productId === product.id)
+    if (existing) {
+      existing.quantity += quantity
+    } else {
+      batchLines.value.push({ productId: product.id, productName: product.name, quantity })
+    }
+  }
+
+  function removeBatchLine(index: number): void {
+    batchLines.value.splice(index, 1)
+  }
+
+  function clearBatchLines(): void {
+    batchLines.value = []
+  }
+
+  async function executeBatchTransfer(
+    fromLocatorId: number,
+    toLocatorId: number
+  ): Promise<boolean> {
+    if (!hasContextField(authStore.context, 'organizationId')) {
+      error.value = '請先登入以設定組織環境'
+      return false
+    }
+
+    if (batchLines.value.length === 0) {
+      error.value = '請至少加入一項藥品'
+      return false
+    }
+
+    isTransferring.value = true
+    error.value = null
+    try {
+      await createBatchTransfer({
+        fromLocatorId,
+        toLocatorId,
+        lines: batchLines.value,
+        orgId: authStore.context!.organizationId,
+      })
+      batchLines.value = []
+      await loadStock()
+      return true
+    } catch (e: any) {
+      error.value = e.message || 'Batch transfer failed'
       return false
     } finally {
       isTransferring.value = false
@@ -123,12 +185,12 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function executeReceive(orderId: number, lines: ReceiptLine[]): Promise<boolean> {
-    if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
-      error.value = 'Organization not set'
+    if (!hasContextField(authStore.context, 'organizationId')) {
+      error.value = '請先登入以設定組織環境'
       return false
     }
-    if (!authStore.context?.warehouseId && authStore.context?.warehouseId !== 0) {
-      error.value = 'Warehouse not set'
+    if (!hasContextField(authStore.context, 'warehouseId')) {
+      error.value = '請先登入以設定倉庫環境'
       return false
     }
 
@@ -157,10 +219,12 @@ export const useInventoryStore = defineStore('inventory', () => {
   return {
     stockItems, warehouses, isLoadingStock,
     transferProducts, isTransferring,
+    batchLines,
     purchaseOrders, orderLines, isLoadingOrders, isReceiving,
     error,
     loadStock, loadWarehouses,
     searchForTransfer, executeTransfer,
+    addBatchLine, removeBatchLine, clearBatchLines, executeBatchTransfer,
     loadPurchaseOrders, loadOrderLines, executeReceive,
   }
 })

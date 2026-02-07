@@ -112,7 +112,7 @@ describe('Registration Store', () => {
       const store = useRegistrationStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       const result = await store.addPatient({ name: 'Jane', taxId: 'B456' })
 
@@ -207,7 +207,7 @@ describe('Registration Store', () => {
       const store = useRegistrationStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       store.todayRegistrations = [
         { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
@@ -256,7 +256,7 @@ describe('Registration Store', () => {
       const store = useRegistrationStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       store.todayRegistrations = [
         { id: 2, resourceId: 101, resourceName: 'Dr. A', queueNumber: '002', patientId: 101, patientName: 'B', patientTaxId: 'B', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
@@ -310,7 +310,7 @@ describe('Registration Store', () => {
       const store = useRegistrationStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       const result = await store.updatePatientTags(100, ['WARNING', 'VIP'])
 
@@ -324,7 +324,7 @@ describe('Registration Store', () => {
       const store = useRegistrationStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 0, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 0, organizationName: '*', warehouseId: 1, warehouseName: 'WH' }
 
       const result = await store.updatePatientTags(100, ['CHRONIC'])
       expect(result).toBe(true)
@@ -334,7 +334,7 @@ describe('Registration Store', () => {
       const store = useRegistrationStore()
       const result = await store.updatePatientTags(100, ['VIP'])
       expect(result).toBe(false)
-      expect(store.error).toBe('Organization not set')
+      expect(store.error).toBe('請先登入以設定組織環境')
     })
   })
 

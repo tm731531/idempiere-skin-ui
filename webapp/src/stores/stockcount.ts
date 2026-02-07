@@ -137,7 +137,7 @@ export const useStockCountStore = defineStore('stockcount', () => {
     lines: CountLine[]
   ): Promise<boolean> {
     if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
-      error.value = 'Organization not set'
+      error.value = '請先登入以設定組織環境'
       return false
     }
 

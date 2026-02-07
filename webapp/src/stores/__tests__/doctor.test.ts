@@ -214,7 +214,7 @@ describe('Doctor Store', () => {
       // Manually set auth context (since auth store is also pinia)
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       const result = await store.save()
 
@@ -302,7 +302,7 @@ describe('Doctor Store', () => {
       const store = useDoctorStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       store.addMedicine({ id: 1, value: '', name: 'Aspirin', isActive: true }, 3, 'TID', 7)
 

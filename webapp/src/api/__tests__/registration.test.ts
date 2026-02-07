@@ -27,6 +27,11 @@ vi.mock('../client', () => ({
   },
 }))
 
+vi.mock('../lookup', () => ({
+  lookupCustomerGroupId: vi.fn().mockResolvedValue(999),
+  clearLookupCache: vi.fn(),
+}))
+
 const mockGet = vi.mocked(apiClient.get)
 const mockPost = vi.mocked(apiClient.post)
 const mockPut = vi.mocked(apiClient.put)
@@ -110,7 +115,7 @@ describe('createPatient', () => {
       'AD_Org_ID': 11,
       'Name': 'Jane',
       'TaxID': 'B987654321',
-      'C_BP_Group_ID': 103,
+      'C_BP_Group_ID': 999,
       'IsCustomer': true,
       'IsVendor': false,
       'IsEmployee': false,

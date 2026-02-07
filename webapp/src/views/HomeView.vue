@@ -25,6 +25,8 @@ const allMenuItems: MenuItem[] = [
   { title: '調撥', icon: '🔄', path: '/inventory/transfer', color: '#607D8B', roles: ['warehouse', 'admin'] },
   { title: '入庫', icon: '📥', path: '/inventory/receive', color: '#00BCD4', roles: ['warehouse', 'admin'] },
   { title: '盤點', icon: '📊', path: '/inventory/count', color: '#5D4037', roles: ['warehouse', 'admin'] },
+  { title: '產品', icon: '🏷️', path: '/inventory/product', color: '#455A64', roles: ['warehouse', 'admin'] },
+  { title: '採購', icon: '🛒', path: '/inventory/purchase', color: '#E91E63', roles: ['warehouse', 'purchasing', 'admin'] },
 ]
 
 // Role keyword to category mapping
@@ -38,6 +40,8 @@ const ROLE_MAP: Record<string, string> = {
   '藥師': 'pharmacy',
   'warehouse': 'warehouse',
   '倉庫': 'warehouse',
+  'purchasing': 'purchasing',
+  '採購': 'purchasing',
   'admin': 'admin',
   'superuser': 'admin',
   'system administrator': 'admin',
@@ -70,7 +74,14 @@ function handleLogout() {
 <template>
   <div class="home-container">
     <header class="home-header">
-      <h1>醫療診所系統</h1>
+      <div class="header-left">
+        <h1>醫療診所系統</h1>
+        <div v-if="authStore.context" class="context-info">
+          {{ authStore.context.clientName }}
+          <span v-if="authStore.context.organizationName"> / {{ authStore.context.organizationName }}</span>
+          <span v-if="authStore.context.warehouseName"> / {{ authStore.context.warehouseName }}</span>
+        </div>
+      </div>
       <div class="user-info">
         <span>{{ authStore.user?.name || '使用者' }}
           <span v-if="authStore.user?.role" class="role-badge">{{ authStore.user.role }}</span>
@@ -117,10 +128,21 @@ function handleLogout() {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 .home-header h1 {
   font-size: 1.25rem;
   font-weight: bold;
   color: #333;
+}
+
+.context-info {
+  font-size: 0.75rem;
+  color: #999;
 }
 
 .user-info {

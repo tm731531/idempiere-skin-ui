@@ -100,6 +100,21 @@ const router = createRouter({
           name: 'count',
           component: () => import('@/views/inventory/CountView.vue'),
         },
+        {
+          path: 'product',
+          name: 'product',
+          component: () => import('@/views/inventory/ProductView.vue'),
+        },
+        {
+          path: 'history',
+          name: 'transfer-history',
+          component: () => import('@/views/inventory/TransferHistoryView.vue'),
+        },
+        {
+          path: 'purchase',
+          name: 'purchase',
+          component: () => import('@/views/inventory/PurchaseView.vue'),
+        },
       ],
     },
     // 404

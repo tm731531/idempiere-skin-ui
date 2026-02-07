@@ -110,7 +110,7 @@ describe('Pharmacy Store', () => {
       // Set auth context
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       const item = {
         assignmentId: 100,
@@ -136,7 +136,7 @@ describe('Pharmacy Store', () => {
       const store = usePharmacyStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       store.dispenseQueue = [
         { assignmentId: 100, prescription: {} as any, status: 'DISPENSING' },

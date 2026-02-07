@@ -28,6 +28,11 @@ import {
   setPatientTags,
 } from '@/api/registration'
 
+/** Check if auth context has a valid organizationId (zero is valid!) */
+function hasOrgContext(context: { organizationId: number } | null | undefined): context is { organizationId: number } {
+  return context != null && context.organizationId !== null && context.organizationId !== undefined
+}
+
 export const useRegistrationStore = defineStore('registration', () => {
   const authStore = useAuthStore()
 
@@ -129,7 +134,7 @@ export const useRegistrationStore = defineStore('registration', () => {
    * 建立新病人
    */
   async function addPatient(data: { name: string; taxId: string; phone?: string }): Promise<Patient | null> {
-    if (!authStore.context?.organizationId) {
+    if (!hasOrgContext(authStore.context)) {
       error.value = '未設定組織'
       return null
     }
@@ -215,7 +220,7 @@ export const useRegistrationStore = defineStore('registration', () => {
       return null
     }
 
-    if (!authStore.context?.organizationId) {
+    if (!hasOrgContext(authStore.context)) {
       error.value = '未設定組織'
       return null
     }
@@ -273,7 +278,7 @@ export const useRegistrationStore = defineStore('registration', () => {
    * 叫號
    */
   async function call(registrationId: number): Promise<void> {
-    if (!authStore.context?.organizationId) return
+    if (!hasOrgContext(authStore.context)) return
 
     try {
       await callPatient(registrationId, authStore.context.organizationId)
@@ -290,7 +295,7 @@ export const useRegistrationStore = defineStore('registration', () => {
    * 開始看診
    */
   async function startConsult(registrationId: number): Promise<void> {
-    if (!authStore.context?.organizationId) return
+    if (!hasOrgContext(authStore.context)) return
 
     try {
       await startConsultation(registrationId, authStore.context.organizationId)
@@ -310,7 +315,7 @@ export const useRegistrationStore = defineStore('registration', () => {
    * 完成看診
    */
   async function completeConsult(registrationId: number): Promise<void> {
-    if (!authStore.context?.organizationId) return
+    if (!hasOrgContext(authStore.context)) return
 
     try {
       await completeConsultation(registrationId, authStore.context.organizationId)
@@ -327,7 +332,7 @@ export const useRegistrationStore = defineStore('registration', () => {
    * 取消掛號
    */
   async function cancel(registrationId: number): Promise<void> {
-    if (!authStore.context?.organizationId) return
+    if (!hasOrgContext(authStore.context)) return
 
     try {
       await cancelRegistration(registrationId, authStore.context.organizationId)
@@ -371,8 +376,8 @@ export const useRegistrationStore = defineStore('registration', () => {
   }
 
   async function updatePatientTags(patientId: number, tags: PatientTag[]): Promise<boolean> {
-    if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
-      error.value = 'Organization not set'
+    if (!hasOrgContext(authStore.context)) {
+      error.value = '請先登入以設定組織環境'
       return false
     }
     try {

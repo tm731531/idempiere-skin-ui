@@ -10,7 +10,7 @@ const inventoryStore = useInventoryStore()
 // Create task modal
 const showCreateModal = ref(false)
 const newTaskName = ref('')
-const newTaskWarehouse = ref('')
+const newTaskWarehouseId = ref<number>(0)
 
 onMounted(async () => {
   await countStore.loadTasks()
@@ -18,9 +18,9 @@ onMounted(async () => {
   await inventoryStore.loadWarehouses()
 })
 
-// Warehouse names for the create modal
-const warehouseNames = computed(() =>
-  inventoryStore.warehouses.map(w => w.name)
+// Warehouses for the create modal
+const warehouseOptions = computed(() =>
+  inventoryStore.warehouses.map(w => ({ id: w.id, name: w.name }))
 )
 
 // Format date for display
@@ -44,11 +44,17 @@ function statusLabel(status: string): string {
 async function onCreate() {
   if (!newTaskName.value.trim()) return
 
-  const warehouseName = newTaskWarehouse.value || '全部'
+  const selectedWh = inventoryStore.warehouses.find(w => w.id === newTaskWarehouseId.value)
+  const warehouseName = selectedWh?.name || '全部'
 
-  // Build lines from current stock data
+  // Build locator ID set for selected warehouse
+  const selectedLocatorIds = selectedWh
+    ? new Set(selectedWh.locators.map(l => l.id))
+    : null
+
+  // Build lines from current stock data, filtering by locator IDs
   const lines: CountLine[] = inventoryStore.stockItems
-    .filter(item => warehouseName === '全部' || item.locatorName.includes(warehouseName))
+    .filter(item => !selectedLocatorIds || selectedLocatorIds.has(item.locatorId))
     .map(item => ({
       productId: item.productId,
       productName: item.productName,
@@ -62,7 +68,7 @@ async function onCreate() {
   if (success) {
     showCreateModal.value = false
     newTaskName.value = ''
-    newTaskWarehouse.value = ''
+    newTaskWarehouseId.value = 0
   }
 }
 
@@ -241,9 +247,9 @@ function countedLines(lines: CountLine[]): number {
           </div>
           <div class="form-group">
             <label>倉庫</label>
-            <select v-model="newTaskWarehouse" class="select">
-              <option value="">全部</option>
-              <option v-for="name in warehouseNames" :key="name" :value="name">{{ name }}</option>
+            <select v-model="newTaskWarehouseId" class="select">
+              <option :value="0">全部</option>
+              <option v-for="wh in warehouseOptions" :key="wh.id" :value="wh.id">{{ wh.name }}</option>
             </select>
           </div>
           <div class="form-group">

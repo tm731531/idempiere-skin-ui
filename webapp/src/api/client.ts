@@ -37,10 +37,13 @@ apiClient.interceptors.response.use(
     return response
   },
   (error) => {
-    // 401 未授權 - 跳轉登入
+    // 401 未授權 - 清除所有 auth 資料，跳轉登入
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
-      window.location.href = '/ui/login'
+      localStorage.removeItem('auth_context')
+      localStorage.removeItem('auth_user')
+      window.location.hash = '#/login'
+      window.location.reload()
     }
     return Promise.reject(error)
   }

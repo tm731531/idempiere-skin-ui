@@ -11,10 +11,18 @@ vi.mock('@/api/inventory', () => ({
   listWarehouses: vi.fn(),
   searchProducts: vi.fn(),
   createTransfer: vi.fn(),
+  createBatchTransfer: vi.fn(),
   listPurchaseOrders: vi.fn(),
   getOrderLines: vi.fn(),
   createReceipt: vi.fn(),
   getOrderVendorId: vi.fn(),
+}))
+
+vi.mock('@/api/lookup', () => ({
+  lookupDocTypeId: vi.fn().mockResolvedValue(555),
+  lookupEachUomId: vi.fn().mockResolvedValue(200),
+  lookupCustomerGroupId: vi.fn().mockResolvedValue(999),
+  clearLookupCache: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({
@@ -118,7 +126,7 @@ describe('Inventory Store', () => {
       const store = useInventoryStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       const result = await store.executeTransfer(100, 200, 201, 10)
 
@@ -139,7 +147,7 @@ describe('Inventory Store', () => {
       const store = useInventoryStore()
       const result = await store.executeTransfer(100, 200, 201, 10)
       expect(result).toBe(false)
-      expect(store.error).toBe('Organization not set')
+      expect(store.error).toBe('請先登入以設定組織環境')
     })
 
     it('handles orgId=0 correctly (falsy zero)', async () => {
@@ -149,7 +157,7 @@ describe('Inventory Store', () => {
       const store = useInventoryStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 0, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 0, organizationName: '*', warehouseId: 1, warehouseName: 'WH' }
 
       const result = await store.executeTransfer(100, 200, 201, 10)
       expect(result).toBe(true) // orgId=0 is valid
@@ -161,7 +169,7 @@ describe('Inventory Store', () => {
       const store = useInventoryStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       const result = await store.executeTransfer(100, 200, 201, 10)
 
@@ -205,7 +213,7 @@ describe('Inventory Store', () => {
       const store = useInventoryStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 2000 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 2000, warehouseName: 'WH' }
 
       // Set up order lines with qtyReceived
       const lines = [
@@ -226,18 +234,18 @@ describe('Inventory Store', () => {
       const store = useInventoryStore()
       const result = await store.executeReceive(300, [])
       expect(result).toBe(false)
-      expect(store.error).toBe('Organization not set')
+      expect(store.error).toBe('請先登入以設定組織環境')
     })
 
     it('returns false without warehouse context', async () => {
       const store = useInventoryStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: null }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: null, warehouseName: '' }
 
       const result = await store.executeReceive(300, [])
       expect(result).toBe(false)
-      expect(store.error).toBe('Warehouse not set')
+      expect(store.error).toBe('請先登入以設定倉庫環境')
     })
 
     it('handles warehouseId=0 correctly', async () => {
@@ -248,7 +256,7 @@ describe('Inventory Store', () => {
       const store = useInventoryStore()
       const { useAuthStore } = await import('../auth')
       const authStore = useAuthStore()
-      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 0 }
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 0, warehouseName: 'WH' }
 
       const lines = [
         { orderLineId: 400, productId: 100, productName: 'Aspirin', qtyOrdered: 100, qtyDelivered: 50, qtyReceived: 50 },
@@ -256,6 +264,81 @@ describe('Inventory Store', () => {
 
       const result = await store.executeReceive(300, lines)
       expect(result).toBe(true) // warehouseId=0 is valid
+    })
+  })
+
+  describe('batch transfer', () => {
+    it('adds, removes, and clears batch lines', () => {
+      const store = useInventoryStore()
+
+      store.addBatchLine({ id: 100, name: 'Aspirin' }, 10)
+      expect(store.batchLines).toHaveLength(1)
+      expect(store.batchLines[0]).toEqual({ productId: 100, productName: 'Aspirin', quantity: 10 })
+
+      // Adding same product accumulates quantity
+      store.addBatchLine({ id: 100, name: 'Aspirin' }, 5)
+      expect(store.batchLines).toHaveLength(1)
+      expect(store.batchLines[0].quantity).toBe(15)
+
+      // Adding different product
+      store.addBatchLine({ id: 101, name: 'Ibuprofen' }, 3)
+      expect(store.batchLines).toHaveLength(2)
+
+      // Remove by index
+      store.removeBatchLine(0)
+      expect(store.batchLines).toHaveLength(1)
+      expect(store.batchLines[0].productName).toBe('Ibuprofen')
+
+      // Clear all
+      store.clearBatchLines()
+      expect(store.batchLines).toHaveLength(0)
+    })
+
+    it('executes batch transfer and clears lines', async () => {
+      vi.mocked(inventoryApi.createBatchTransfer).mockResolvedValue(700)
+      vi.mocked(inventoryApi.listStock).mockResolvedValue([])
+
+      const store = useInventoryStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
+
+      store.addBatchLine({ id: 100, name: 'Aspirin' }, 10)
+      store.addBatchLine({ id: 101, name: 'Ibuprofen' }, 5)
+
+      const result = await store.executeBatchTransfer(200, 201)
+
+      expect(result).toBe(true)
+      expect(inventoryApi.createBatchTransfer).toHaveBeenCalledWith({
+        fromLocatorId: 200,
+        toLocatorId: 201,
+        lines: [
+          { productId: 100, productName: 'Aspirin', quantity: 10 },
+          { productId: 101, productName: 'Ibuprofen', quantity: 5 },
+        ],
+        orgId: 11,
+      })
+      expect(store.batchLines).toHaveLength(0) // cleared after success
+    })
+
+    it('returns false with empty batch lines', async () => {
+      const store = useInventoryStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
+
+      const result = await store.executeBatchTransfer(200, 201)
+      expect(result).toBe(false)
+      expect(store.error).toBe('請至少加入一項藥品')
+    })
+
+    it('returns false without org context', async () => {
+      const store = useInventoryStore()
+      store.addBatchLine({ id: 100, name: 'Aspirin' }, 10)
+
+      const result = await store.executeBatchTransfer(200, 201)
+      expect(result).toBe(false)
+      expect(store.error).toBe('請先登入以設定組織環境')
     })
   })
 })

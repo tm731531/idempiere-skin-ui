@@ -2,7 +2,7 @@
  * Inventory API Unit Tests
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { listStock, searchProducts, createTransfer, listWarehouses, listPurchaseOrders, getOrderLines, createReceipt, getOrderVendorId } from '../inventory'
+import { listStock, searchProducts, createTransfer, listWarehouses, listPurchaseOrders, getOrderLines, createReceipt, getOrderVendorId, listTransferHistory, getTransferLines, getDocStatusLabel } from '../inventory'
 import { apiClient } from '../client'
 
 vi.mock('../client', () => ({
@@ -11,6 +11,11 @@ vi.mock('../client', () => ({
     post: vi.fn(),
     put: vi.fn(),
   },
+}))
+
+vi.mock('../lookup', () => ({
+  lookupDocTypeId: vi.fn().mockResolvedValue(555),
+  lookupEachUomId: vi.fn().mockResolvedValue(200),
 }))
 
 const mockGet = vi.mocked(apiClient.get)
@@ -22,18 +27,17 @@ beforeEach(() => {
 })
 
 describe('listStock', () => {
-  it('returns mapped stock items', async () => {
-    mockGet.mockResolvedValue({
-      data: {
-        records: [
-          {
-            M_Product_ID: { id: 100, identifier: 'Aspirin' },
-            M_Locator_ID: { id: 200, identifier: 'WH1-L1' },
-            QtyOnHand: 50,
-          },
-        ],
-      },
-    })
+  function setupStockMocks(locators: any[], stockRecords: any[]) {
+    mockGet
+      .mockResolvedValueOnce({ data: { records: locators } })  // locator→warehouse query
+      .mockResolvedValueOnce({ data: { records: stockRecords } }) // stock query
+  }
+
+  it('returns mapped stock items with warehouse info', async () => {
+    setupStockMocks(
+      [{ id: 200, Value: 'WH1-L1', M_Warehouse_ID: { id: 10, identifier: 'Main WH' } }],
+      [{ M_Product_ID: { id: 100, identifier: 'Aspirin' }, M_Locator_ID: { id: 200, identifier: 'WH1-L1' }, QtyOnHand: 50 }],
+    )
 
     const result = await listStock()
     expect(result).toHaveLength(1)
@@ -43,27 +47,20 @@ describe('listStock', () => {
       productCode: '',
       locatorId: 200,
       locatorName: 'WH1-L1',
+      warehouseId: 10,
+      warehouseName: 'Main WH',
       qtyOnHand: 50,
     })
   })
 
   it('filters by keyword (client-side)', async () => {
-    mockGet.mockResolvedValue({
-      data: {
-        records: [
-          {
-            M_Product_ID: { id: 100, identifier: 'Aspirin' },
-            M_Locator_ID: { id: 200, identifier: 'WH1' },
-            QtyOnHand: 50,
-          },
-          {
-            M_Product_ID: { id: 101, identifier: 'Ibuprofen' },
-            M_Locator_ID: { id: 200, identifier: 'WH1' },
-            QtyOnHand: 30,
-          },
-        ],
-      },
-    })
+    setupStockMocks(
+      [{ id: 200, Value: 'WH1', M_Warehouse_ID: { id: 10, identifier: 'WH' } }],
+      [
+        { M_Product_ID: { id: 100, identifier: 'Aspirin' }, M_Locator_ID: { id: 200, identifier: 'WH1' }, QtyOnHand: 50 },
+        { M_Product_ID: { id: 101, identifier: 'Ibuprofen' }, M_Locator_ID: { id: 200, identifier: 'WH1' }, QtyOnHand: 30 },
+      ],
+    )
 
     const result = await listStock('aspir')
     expect(result).toHaveLength(1)
@@ -71,25 +68,24 @@ describe('listStock', () => {
   })
 
   it('returns empty array when no records', async () => {
-    mockGet.mockResolvedValue({ data: { records: [] } })
+    setupStockMocks([], [])
     const result = await listStock()
     expect(result).toEqual([])
   })
 
   it('handles missing expanded objects gracefully', async () => {
-    mockGet.mockResolvedValue({
-      data: {
-        records: [
-          { M_Product_ID: 100, M_Locator_ID: 200, QtyOnHand: 10 },
-        ],
-      },
-    })
+    setupStockMocks(
+      [],
+      [{ M_Product_ID: 100, M_Locator_ID: 200, QtyOnHand: 10 }],
+    )
 
     const result = await listStock()
     expect(result[0].productId).toBe(100)
     expect(result[0].productName).toBe('')
     expect(result[0].locatorId).toBe(200)
     expect(result[0].locatorName).toBe('')
+    expect(result[0].warehouseId).toBe(0)
+    expect(result[0].warehouseName).toBe('')
   })
 })
 
@@ -135,28 +131,28 @@ describe('createTransfer', () => {
 
     expect(result).toBe(500)
 
-    // Header created with C_DocType_ID
+    // Header created with C_DocType_ID (dynamic lookup returns 555)
     expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_Movement', expect.objectContaining({
       'AD_Org_ID': 11,
-      'C_DocType_ID': 143,
+      'C_DocType_ID': 555,
       'Description': 'Clinic transfer',
     }))
 
-    // Line created with C_UOM_ID, QtyEntered, TargetQty
+    // Line created with C_UOM_ID (dynamic lookup returns 200), QtyEntered, TargetQty
     expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_MovementLine', expect.objectContaining({
       'M_Movement_ID': 500,
       'M_Product_ID': 100,
       'M_Locator_ID': 200,
       'M_LocatorTo_ID': 201,
-      'C_UOM_ID': 100,
+      'C_UOM_ID': 200,
       'MovementQty': 10,
       'QtyEntered': 10,
       'TargetQty': 0,
     }))
 
-    // Completion attempted
+    // Completion attempted (doc-action is the REST API key)
     expect(mockPut).toHaveBeenCalledWith('/api/v1/models/M_Movement/500', {
-      'DocAction': 'CO',
+      'doc-action': 'CO',
     })
   })
 
@@ -282,13 +278,13 @@ describe('createReceipt', () => {
 
     expect(result).toBe(600)
 
-    // Header created with all required fields
+    // Header created with all required fields (C_DocType_ID from dynamic lookup = 555)
     expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_InOut', expect.objectContaining({
       'AD_Org_ID': 11,
       'C_Order_ID': 300,
       'C_BPartner_ID': 1000,
       'C_BPartner_Location_ID': 109,
-      'C_DocType_ID': 122,
+      'C_DocType_ID': 555,
       'M_Warehouse_ID': 2000,
       'IsSOTrx': false,
       'MovementType': 'V+',
@@ -301,7 +297,7 @@ describe('createReceipt', () => {
       'M_Product_ID': 100,
       'M_Locator_ID': 101,
       'M_AttributeSetInstance_ID': 0,
-      'C_UOM_ID': 100,
+      'C_UOM_ID': 200,
       'MovementQty': 50,
       'QtyEntered': 50,
     }))
@@ -312,9 +308,9 @@ describe('createReceipt', () => {
       'MovementQty': 100,
     }))
 
-    // Completion attempted
+    // Completion attempted (doc-action is the REST API key)
     expect(mockPut).toHaveBeenCalledWith('/api/v1/models/M_InOut/600', {
-      'DocAction': 'CO',
+      'doc-action': 'CO',
     })
   })
 
@@ -389,5 +385,77 @@ describe('getOrderVendorId', () => {
 
     const result = await getOrderVendorId(300)
     expect(result).toBe(1000)
+  })
+})
+
+describe('listTransferHistory', () => {
+  it('returns mapped transfer documents', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          {
+            id: 900,
+            DocumentNo: 'MM-001',
+            MovementDate: '2025-01-15',
+            DocStatus: 'CO',
+            Description: 'Transfer batch',
+          },
+        ],
+      },
+    })
+
+    const result = await listTransferHistory()
+    expect(result).toHaveLength(1)
+    expect(result[0]).toEqual({
+      id: 900,
+      documentNo: 'MM-001',
+      movementDate: '2025-01-15',
+      docStatus: 'CO',
+      description: 'Transfer batch',
+    })
+  })
+
+  it('returns empty array when no records', async () => {
+    mockGet.mockResolvedValue({ data: { records: [] } })
+    const result = await listTransferHistory()
+    expect(result).toEqual([])
+  })
+})
+
+describe('getTransferLines', () => {
+  it('returns mapped movement lines', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          {
+            M_Product_ID: { identifier: 'Aspirin' },
+            MovementQty: 20,
+            M_Locator_ID: { identifier: 'WH1-L1' },
+            M_LocatorTo_ID: { identifier: 'WH2-L1' },
+          },
+        ],
+      },
+    })
+
+    const result = await getTransferLines(900)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toEqual({
+      productName: 'Aspirin',
+      quantity: 20,
+      fromLocator: 'WH1-L1',
+      toLocator: 'WH2-L1',
+    })
+  })
+})
+
+describe('getDocStatusLabel', () => {
+  it('returns Chinese label for known statuses', () => {
+    expect(getDocStatusLabel('CO')).toBe('已完成')
+    expect(getDocStatusLabel('DR')).toBe('草稿')
+    expect(getDocStatusLabel('VO')).toBe('已作廢')
+  })
+
+  it('returns raw status for unknown statuses', () => {
+    expect(getDocStatusLabel('XX')).toBe('XX')
   })
 })
