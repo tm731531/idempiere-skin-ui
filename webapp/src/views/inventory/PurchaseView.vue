@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { usePurchaseStore } from '@/stores/purchase'
+import { findProductByBarcode } from '@/api/product'
+import { listProductConversions, type UomConversion } from '@/api/uomConversion'
+import BarcodeInput from '@/components/BarcodeInput.vue'
 
 const store = usePurchaseStore()
 
@@ -10,7 +13,11 @@ const vendorSearch = ref('')
 const productSearch = ref('')
 const addQty = ref(1)
 const addPrice = ref(0)
+const priceMode = ref<'unit' | 'total'>('unit')
 const selectedProduct = ref<{ id: number; name: string; value: string } | null>(null)
+const conversions = ref<UomConversion[]>([])
+const selectedConversion = ref<UomConversion | null>(null)
+const isLoadingConversions = ref(false)
 let vendorSearchTimer: ReturnType<typeof setTimeout> | null = null
 let productSearchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -40,22 +47,59 @@ function onProductSearch() {
   }, 300)
 }
 
-function pickProduct(product: { id: number; name: string; value: string }) {
+async function pickProduct(product: { id: number; name: string; value: string }) {
   selectedProduct.value = product
   addQty.value = 1
   addPrice.value = 0
+  selectedConversion.value = null
+  conversions.value = []
+
+  // Load UOM conversions for this product
+  isLoadingConversions.value = true
+  try {
+    conversions.value = await listProductConversions(product.id)
+  } catch {
+    // Non-critical — just won't show conversion options
+  } finally {
+    isLoadingConversions.value = false
+  }
 }
+
+const convertedQty = computed(() => {
+  if (!selectedConversion.value || addQty.value <= 0) return null
+  return Math.round(addQty.value * selectedConversion.value.divideRate)
+})
 
 function confirmAddProduct() {
   if (!selectedProduct.value || addQty.value <= 0) return
-  store.addLine(selectedProduct.value, addQty.value, addPrice.value)
+  const qty = convertedQty.value || addQty.value
+  const unitPrice = priceMode.value === 'total' && qty > 0
+    ? Math.round((addPrice.value / qty) * 100) / 100
+    : addPrice.value
+  store.addLine(selectedProduct.value, qty, unitPrice)
   selectedProduct.value = null
+  selectedConversion.value = null
+  conversions.value = []
   productSearch.value = ''
+  priceMode.value = 'unit'
   store.productSearchResults = []
 }
 
 function cancelAddProduct() {
   selectedProduct.value = null
+  selectedConversion.value = null
+  conversions.value = []
+}
+
+async function onBarcodeScan(barcode: string) {
+  const product = await findProductByBarcode(barcode)
+  if (product) {
+    pickProduct(product)
+  } else {
+    // Not found — fall back to text search
+    productSearch.value = barcode
+    await store.searchProductsForPO(barcode)
+  }
 }
 
 // Total
@@ -124,6 +168,10 @@ function startNew() {
 
       <!-- Product search -->
       <div v-if="!selectedProduct" class="search-bar">
+        <BarcodeInput
+          placeholder="掃描條碼..."
+          @scan="onBarcodeScan"
+        />
         <input
           v-model="productSearch"
           type="text"
@@ -153,13 +201,56 @@ function startNew() {
       <!-- Add product form -->
       <div v-if="selectedProduct" class="add-product-form">
         <div class="add-header">{{ selectedProduct.name }}</div>
+
+        <!-- UOM conversion selector -->
+        <div v-if="isLoadingConversions" class="conversion-loading">載入單位轉換...</div>
+        <div v-else-if="conversions.length > 0" class="conversion-section">
+          <label>單位轉換</label>
+          <div class="conversion-options">
+            <div
+              class="conversion-option"
+              :class="{ selected: !selectedConversion }"
+              @click="selectedConversion = null"
+            >
+              基本單位
+            </div>
+            <div
+              v-for="conv in conversions"
+              :key="conv.id"
+              class="conversion-option"
+              :class="{ selected: selectedConversion?.id === conv.id }"
+              @click="selectedConversion = conv"
+            >
+              {{ conv.fromUomName }} → {{ conv.toUomName }} (1:{{ conv.divideRate }})
+            </div>
+          </div>
+        </div>
+
         <div class="add-row">
-          <label>數量</label>
+          <label>{{ selectedConversion ? selectedConversion.fromUomName : '數量' }}</label>
           <input v-model.number="addQty" type="number" min="1" class="input input-sm" />
         </div>
+        <div v-if="convertedQty" class="conversion-result">
+          = {{ convertedQty }} {{ selectedConversion?.toUomName }}
+        </div>
+        <div class="price-mode-toggle">
+          <button
+            class="toggle-btn"
+            :class="{ active: priceMode === 'unit' }"
+            @click="priceMode = 'unit'; addPrice = 0"
+          >單價</button>
+          <button
+            class="toggle-btn"
+            :class="{ active: priceMode === 'total' }"
+            @click="priceMode = 'total'; addPrice = 0"
+          >總價</button>
+        </div>
         <div class="add-row">
-          <label>單價</label>
+          <label>{{ priceMode === 'unit' ? '單價' : '總價' }}</label>
           <input v-model.number="addPrice" type="number" min="0" step="0.01" class="input input-sm" />
+        </div>
+        <div v-if="priceMode === 'total' && addPrice > 0 && (convertedQty || addQty) > 0" class="price-calc">
+          單價 ≈ ${{ (addPrice / (convertedQty || addQty)).toFixed(2) }}
         </div>
         <div class="add-actions">
           <button class="btn btn-sm" @click="cancelAddProduct">取消</button>
@@ -294,6 +385,17 @@ function startNew() {
 .add-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .add-row label { min-width: 3rem; font-size: 0.875rem; color: #666; }
 .add-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
+.conversion-loading { font-size: 0.75rem; color: #999; margin-bottom: 0.5rem; }
+.conversion-section { margin-bottom: 0.75rem; }
+.conversion-section label { display: block; font-size: 0.875rem; color: #666; margin-bottom: 0.375rem; }
+.conversion-options { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+.conversion-option { padding: 0.375rem 0.75rem; border: 1px solid #ddd; border-radius: 1rem; font-size: 0.75rem; cursor: pointer; background: white; }
+.conversion-option.selected { background: #795548; color: white; border-color: #795548; }
+.conversion-result { font-size: 0.875rem; color: #4CAF50; font-weight: 600; margin-bottom: 0.5rem; padding-left: 3.5rem; }
+.price-mode-toggle { display: flex; gap: 0; margin-bottom: 0.5rem; border: 1px solid #ddd; border-radius: 0.5rem; overflow: hidden; }
+.toggle-btn { flex: 1; padding: 0.5rem; border: none; background: white; font-size: 0.875rem; cursor: pointer; }
+.toggle-btn.active { background: #795548; color: white; }
+.price-calc { font-size: 0.75rem; color: #666; margin-bottom: 0.5rem; padding-left: 3.5rem; }
 
 /* Order lines */
 .order-lines { margin: 1rem 0; }

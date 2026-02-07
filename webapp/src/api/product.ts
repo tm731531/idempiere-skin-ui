@@ -103,7 +103,10 @@ export interface Product {
   name: string
   value: string
   upc: string
+  categoryId: number
   categoryName: string
+  uomId: number
+  uomName: string
   isActive: boolean
 }
 
@@ -123,20 +126,27 @@ export async function listProducts(keyword?: string): Promise<Product[]> {
     params: {
       '$filter': filter,
       '$select': 'M_Product_ID,Value,Name,UPC',
-      '$expand': 'M_Product_Category_ID',
+      '$expand': 'M_Product_Category_ID,C_UOM_ID',
       '$orderby': 'Name asc',
       '$top': 100,
     },
   })
 
-  return (response.data.records || []).map((r: any) => ({
-    id: r.id,
-    name: r.Name || '',
-    value: r.Value || '',
-    upc: r.UPC || '',
-    categoryName: r.M_Product_Category_ID?.identifier || r.M_Product_Category_ID?.Name || '',
-    isActive: true,
-  }))
+  return (response.data.records || []).map((r: any) => {
+    const cat = r.M_Product_Category_ID
+    const uom = r.C_UOM_ID
+    return {
+      id: r.id,
+      name: r.Name || '',
+      value: r.Value || '',
+      upc: r.UPC || '',
+      categoryId: typeof cat === 'object' ? (cat?.id || 0) : (cat || 0),
+      categoryName: typeof cat === 'object' ? (cat?.identifier || cat?.Name || '') : '',
+      uomId: typeof uom === 'object' ? (uom?.id || 0) : (uom || 0),
+      uomName: typeof uom === 'object' ? (uom?.identifier || uom?.Name || '') : '',
+      isActive: true,
+    }
+  })
 }
 
 // ========== Update ==========
@@ -144,8 +154,62 @@ export async function listProducts(keyword?: string): Promise<Product[]> {
 /**
  * Update product basic fields.
  */
-export async function updateProduct(id: number, data: { Name?: string; UPC?: string; Value?: string }): Promise<void> {
+export async function updateProduct(id: number, data: Record<string, any>): Promise<void> {
   await apiClient.put(`/api/v1/models/M_Product/${id}`, data)
+}
+
+// ========== UOM ==========
+
+export interface UomOption {
+  id: number
+  name: string
+  label: string
+}
+
+const UOM_LABELS: Record<string, string> = {
+  'Each': '顆',
+  'Pack': '袋',
+  'Bottle': '瓶',
+  'Gram': '克',
+  'Jar': '罐',
+  'Milliliter': 'ml',
+  'Dose': '劑',
+  'Piece': '片',
+}
+
+/**
+ * List available UOMs for product creation.
+ */
+export async function listUoms(): Promise<UomOption[]> {
+  const response = await apiClient.get('/api/v1/models/C_UOM', {
+    params: {
+      '$filter': 'IsActive eq true',
+      '$select': 'C_UOM_ID,Name',
+      '$orderby': 'Name asc',
+      '$top': 50,
+    },
+  })
+
+  return (response.data.records || []).map((r: any) => ({
+    id: r.id,
+    name: r.Name || '',
+    label: UOM_LABELS[r.Name] || r.Name || '',
+  }))
+}
+
+// ========== Category Create ==========
+
+/**
+ * Create a new product category.
+ */
+export async function createProductCategory(name: string, orgId: number): Promise<{ id: number; name: string }> {
+  const response = await apiClient.post('/api/v1/models/M_Product_Category', {
+    'AD_Org_ID': orgId,
+    'Name': name,
+    'Value': name,
+    'IsActive': true,
+  })
+  return { id: response.data.id, name: response.data.Name || name }
 }
 
 // ========== Internal ==========

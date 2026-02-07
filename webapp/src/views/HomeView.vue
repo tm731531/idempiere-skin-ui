@@ -27,6 +27,8 @@ const allMenuItems: MenuItem[] = [
   { title: '盤點', icon: '📊', path: '/inventory/count', color: '#5D4037', roles: ['warehouse', 'admin'] },
   { title: '產品', icon: '🏷️', path: '/inventory/product', color: '#455A64', roles: ['warehouse', 'admin'] },
   { title: '採購', icon: '🛒', path: '/inventory/purchase', color: '#E91E63', roles: ['warehouse', 'purchasing', 'admin'] },
+  { title: '醫師', icon: '⚕️', path: '/admin/doctors', color: '#009688', roles: ['admin'] },
+  { title: '健保讀卡', icon: '🏥', path: '/admin/nhi', color: '#1565c0', roles: ['admin', 'counter'] },
 ]
 
 // Role keyword to category mapping
@@ -65,6 +67,11 @@ function navigateTo(path: string) {
   router.push(path)
 }
 
+function handleSwitchContext() {
+  authStore.switchContext()
+  router.push('/login')
+}
+
 function handleLogout() {
   authStore.logout()
   router.push('/login')
@@ -86,6 +93,7 @@ function handleLogout() {
         <span>{{ authStore.user?.name || '使用者' }}
           <span v-if="authStore.user?.role" class="role-badge">{{ authStore.user.role }}</span>
         </span>
+        <button @click="handleSwitchContext" class="switch-btn">切換環境</button>
         <button @click="handleLogout" class="logout-btn">登出</button>
       </div>
     </header>
@@ -153,6 +161,17 @@ function handleLogout() {
 
 .user-info span {
   color: #666;
+}
+
+.switch-btn {
+  padding: 0.5rem 1rem;
+  background: #FF9800;
+  color: white;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  min-height: 44px;
+  font-size: 0.875rem;
 }
 
 .logout-btn {

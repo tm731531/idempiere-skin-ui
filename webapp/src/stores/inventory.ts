@@ -11,6 +11,7 @@ import {
   type ReceiptLine,
   type BatchTransferLine,
   listStock,
+  listAllProductStock,
   listWarehouses,
   searchProducts,
   createTransfer,
@@ -33,6 +34,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   const stockItems = ref<StockItem[]>([])
   const warehouses = ref<Warehouse[]>([])
   const isLoadingStock = ref(false)
+  const showZeroStock = ref(false)
 
   // Transfer
   const transferProducts = ref<{ id: number; name: string; value: string }[]>([])
@@ -54,7 +56,11 @@ export const useInventoryStore = defineStore('inventory', () => {
     isLoadingStock.value = true
     error.value = null
     try {
-      stockItems.value = await listStock(keyword)
+      if (showZeroStock.value) {
+        stockItems.value = await listAllProductStock(keyword)
+      } else {
+        stockItems.value = await listStock(keyword)
+      }
     } catch (e: any) {
       error.value = e.message || 'Failed to load stock'
     } finally {
@@ -146,7 +152,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     isTransferring.value = true
     error.value = null
     try {
-      await createBatchTransfer({
+      const result = await createBatchTransfer({
         fromLocatorId,
         toLocatorId,
         lines: batchLines.value,
@@ -154,6 +160,10 @@ export const useInventoryStore = defineStore('inventory', () => {
       })
       batchLines.value = []
       await loadStock()
+      if (!result.completed) {
+        error.value = result.error || '調撥單已建立但完成失敗，請至 iDempiere 手動完成'
+        return false
+      }
       return true
     } catch (e: any) {
       error.value = e.message || 'Batch transfer failed'
@@ -217,7 +227,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   return {
-    stockItems, warehouses, isLoadingStock,
+    stockItems, warehouses, isLoadingStock, showZeroStock,
     transferProducts, isTransferring,
     batchLines,
     purchaseOrders, orderLines, isLoadingOrders, isReceiving,

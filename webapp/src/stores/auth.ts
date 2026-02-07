@@ -238,6 +238,7 @@ export const useAuthStore = defineStore('auth', () => {
       // Persist to localStorage for page refresh
       localStorage.setItem('auth_context', JSON.stringify(context.value))
       localStorage.setItem('auth_user', JSON.stringify(user.value))
+      localStorage.setItem('auth_clients', JSON.stringify(availableClients.value))
     } catch (error) {
       console.error('selectWarehouse failed:', error)
       loginError.value = '設定環境失敗'
@@ -322,6 +323,26 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * Switch context: keep token but re-select client/role/org/warehouse.
+   * If clients list is empty (after page refresh), falls back to full re-login.
+   */
+  function switchContext(): void {
+    context.value = null
+    user.value = null
+    loginError.value = ''
+    localStorage.removeItem('auth_context')
+    localStorage.removeItem('auth_user')
+    clearLookupCache()
+
+    if (availableClients.value.length > 0) {
+      loginStep.value = 'client'
+    } else {
+      // No cached clients → must re-authenticate
+      logout()
+    }
+  }
+
   function logout() {
     token.value = null
     user.value = null
@@ -335,6 +356,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('token')
     localStorage.removeItem('auth_context')
     localStorage.removeItem('auth_user')
+    localStorage.removeItem('auth_clients')
     delete apiClient.defaults.headers.common['Authorization']
     clearLookupCache()
   }
@@ -344,16 +366,21 @@ export const useAuthStore = defineStore('auth', () => {
     apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
     const savedContext = localStorage.getItem('auth_context')
     const savedUser = localStorage.getItem('auth_user')
+    const savedClients = localStorage.getItem('auth_clients')
     if (savedContext && savedUser) {
       try {
         context.value = JSON.parse(savedContext)
         user.value = JSON.parse(savedUser)
+        if (savedClients) {
+          availableClients.value = JSON.parse(savedClients)
+        }
         loginStep.value = 'done'
       } catch {
         // 損壞資料 → 強制重新登入
         localStorage.removeItem('token')
         localStorage.removeItem('auth_context')
         localStorage.removeItem('auth_user')
+        localStorage.removeItem('auth_clients')
         token.value = null
       }
     } else {
@@ -382,6 +409,7 @@ export const useAuthStore = defineStore('auth', () => {
     selectWarehouse,
     loginGoBack,
     login,
+    switchContext,
     logout,
   }
 })

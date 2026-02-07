@@ -77,8 +77,9 @@ export async function listVendors(keyword?: string): Promise<Vendor[]> {
 
 /**
  * Get vendor's first active location (C_BPartner_Location_ID).
+ * Auto-creates a default location if none exists.
  */
-export async function getVendorLocationId(vendorId: number): Promise<number> {
+export async function getVendorLocationId(vendorId: number, orgId: number): Promise<number> {
   const response = await apiClient.get('/api/v1/models/C_BPartner_Location', {
     params: {
       '$filter': `C_BPartner_ID eq ${vendorId} and IsActive eq true`,
@@ -87,7 +88,38 @@ export async function getVendorLocationId(vendorId: number): Promise<number> {
   })
 
   const records = response.data.records || []
-  return records[0]?.id || 0
+  if (records.length > 0) return records[0].id
+
+  // Auto-create a default location for this vendor
+  return createDefaultVendorLocation(vendorId, orgId)
+}
+
+/**
+ * Create a default C_Location + C_BPartner_Location for a vendor.
+ * Uses Taiwan (C_Country_ID=316) as default country.
+ */
+async function createDefaultVendorLocation(vendorId: number, orgId: number): Promise<number> {
+  // 1. Create C_Location (address record)
+  const locationResp = await apiClient.post('/api/v1/models/C_Location', {
+    'AD_Org_ID': orgId,
+    'C_Country_ID': 316, // Taiwan
+    'Address1': '（預設地址）',
+  })
+  const locationId = locationResp.data.id
+
+  // 2. Create C_BPartner_Location linking vendor to location
+  const bplResp = await apiClient.post('/api/v1/models/C_BPartner_Location', {
+    'AD_Org_ID': orgId,
+    'C_BPartner_ID': vendorId,
+    'C_Location_ID': locationId,
+    'Name': '預設地址',
+    'IsBillTo': true,
+    'IsShipTo': true,
+    'IsPayFrom': true,
+    'IsRemitTo': true,
+  })
+
+  return bplResp.data.id
 }
 
 // ========== Purchase Order API ==========
@@ -108,11 +140,8 @@ export async function createPurchaseOrder(input: PurchaseOrderInput): Promise<{ 
     lookupCurrentUserId(input.username),
   ])
 
-  // Get vendor location
-  const vendorLocationId = await getVendorLocationId(input.vendorId)
-  if (!vendorLocationId) {
-    throw new Error('供應商尚未設定地址，請先在 iDempiere 中建立供應商地址')
-  }
+  // Get vendor location (auto-creates if missing)
+  const vendorLocationId = await getVendorLocationId(input.vendorId, input.orgId)
 
   const today = new Date().toISOString().slice(0, 10)
 

@@ -108,10 +108,9 @@ export async function listStock(keyword?: string): Promise<StockItem[]> {
 
   const response = await apiClient.get('/api/v1/models/M_StorageOnHand', {
     params: {
-      '$filter': 'QtyOnHand gt 0',
       '$expand': 'M_Product_ID,M_Locator_ID',
       '$orderby': 'M_Product_ID asc',
-      '$top': 200,
+      '$top': 500,
     },
   })
 
@@ -130,6 +129,9 @@ export async function listStock(keyword?: string): Promise<StockItem[]> {
     }
   })
 
+  // Filter out zero-qty (but keep negatives — they indicate issues)
+  items = items.filter((i: StockItem) => i.qtyOnHand !== 0)
+
   // Client-side keyword filter if provided
   if (keyword) {
     const kw = keyword.toLowerCase()
@@ -139,6 +141,96 @@ export async function listStock(keyword?: string): Promise<StockItem[]> {
   }
 
   return items
+}
+
+/**
+ * Get stock on-hand for specific products at a specific locator.
+ * Returns a map of productId → qtyOnHand.
+ */
+export async function getStockAtLocator(
+  locatorId: number,
+  productIds: number[]
+): Promise<Record<number, number>> {
+  if (productIds.length === 0) return {}
+
+  const productFilter = productIds.map(id => `M_Product_ID eq ${id}`).join(' or ')
+  const response = await apiClient.get('/api/v1/models/M_StorageOnHand', {
+    params: {
+      '$filter': `M_Locator_ID eq ${locatorId} and (${productFilter})`,
+      '$select': 'M_Product_ID,QtyOnHand',
+      '$top': 200,
+    },
+  })
+
+  const result: Record<number, number> = {}
+  for (const r of response.data.records || []) {
+    const pid = typeof r.M_Product_ID === 'object' ? (r.M_Product_ID?.id || 0) : (r.M_Product_ID || 0)
+    result[pid] = (result[pid] || 0) + (r.QtyOnHand || 0)
+  }
+  return result
+}
+
+/**
+ * List all products with their stock quantities (including zero-stock products).
+ */
+export async function listAllProductStock(keyword?: string): Promise<StockItem[]> {
+  // Get all products
+  let filter = 'IsActive eq true and ProductType eq \'I\''
+  if (keyword) {
+    const safe = escapeODataString(keyword)
+    filter += ` and (contains(Name,'${safe}') or contains(Value,'${safe}'))`
+  }
+
+  const productResponse = await apiClient.get('/api/v1/models/M_Product', {
+    params: {
+      '$filter': filter,
+      '$select': 'M_Product_ID,Name,Value',
+      '$orderby': 'Name asc',
+      '$top': 200,
+    },
+  })
+
+  const products = (productResponse.data.records || []).map((r: any) => ({
+    id: r.id,
+    name: r.Name || '',
+    value: r.Value || '',
+  }))
+
+  // Get existing stock data
+  const existingStock = await listStock(undefined)
+
+  // Build a map: productId → total qty
+  const stockByProduct: Record<number, number> = {}
+  for (const item of existingStock) {
+    stockByProduct[item.productId] = (stockByProduct[item.productId] || 0) + item.qtyOnHand
+  }
+
+  // Merge: add products with zero stock that aren't in existingStock
+  const result: StockItem[] = [...existingStock]
+  const existingProductIds = new Set(existingStock.map(s => s.productId))
+
+  for (const p of products) {
+    if (!existingProductIds.has(p.id)) {
+      result.push({
+        productId: p.id,
+        productName: p.name,
+        productCode: p.value,
+        locatorId: 0,
+        locatorName: '',
+        warehouseId: 0,
+        warehouseName: '無庫存',
+        qtyOnHand: 0,
+      })
+    }
+  }
+
+  // Apply keyword filter on result if needed
+  if (keyword) {
+    const kw = keyword.toLowerCase()
+    return result.filter(i => i.productName.toLowerCase().includes(kw) || i.productCode?.toLowerCase().includes(kw))
+  }
+
+  return result
 }
 
 export async function searchProducts(keyword: string): Promise<{ id: number; name: string; value: string }[]> {
@@ -207,7 +299,7 @@ export async function createBatchTransfer(input: {
   lines: BatchTransferLine[]
   orgId: number
   description?: string
-}): Promise<number> {
+}): Promise<{ movementId: number; completed: boolean; error?: string }> {
   const docTypeId = await lookupDocTypeId('MMM')
   const uomId = await lookupEachUomId()
 
@@ -241,11 +333,11 @@ export async function createBatchTransfer(input: {
     await apiClient.put(`/api/v1/models/M_Movement/${movementId}`, {
       'doc-action': 'CO',
     })
+    return { movementId, completed: true }
   } catch (e: any) {
     console.error('Batch movement completion failed:', e.message)
+    return { movementId, completed: false, error: e.response?.data?.detail || e.message || '調撥完成失敗' }
   }
-
-  return movementId
 }
 
 // ========== Receive (Material Receipt) API ==========
@@ -432,13 +524,32 @@ export async function listTransferHistory(): Promise<TransferDoc[]> {
     },
   })
 
-  return (response.data.records || []).map((r: any) => ({
-    id: r.id,
-    documentNo: r.DocumentNo || '',
-    movementDate: r.MovementDate || '',
-    docStatus: r.DocStatus || 'DR',
-    description: r.Description || '',
-  }))
+  return (response.data.records || []).map((r: any) => {
+    // DocStatus can be string "DR" or object {"id":"DR","identifier":"Drafted"}
+    const rawStatus = r.DocStatus
+    const docStatus = typeof rawStatus === 'object' ? (rawStatus?.id || 'DR') : (rawStatus || 'DR')
+    return {
+      id: r.id,
+      documentNo: r.DocumentNo || '',
+      movementDate: r.MovementDate || '',
+      docStatus,
+      description: r.Description || '',
+    }
+  })
+}
+
+/**
+ * Extract a display name from an expanded field.
+ * Handles: object with identifier/Name/Value, raw number (ID), or string.
+ */
+function extractName(field: any, fallback = ''): string {
+  if (field === null || field === undefined) return fallback
+  if (typeof field === 'string') return field
+  if (typeof field === 'number') return `#${field}`
+  if (typeof field === 'object') {
+    return field.identifier || field.Name || field.Value || fallback
+  }
+  return String(field)
 }
 
 /**
@@ -453,10 +564,10 @@ export async function getTransferLines(movementId: number): Promise<TransferHist
   })
 
   return (response.data.records || []).map((r: any) => ({
-    productName: r.M_Product_ID?.identifier || r.M_Product_ID?.Name || '',
+    productName: extractName(r.M_Product_ID, '未知產品'),
     quantity: r.MovementQty || 0,
-    fromLocator: r.M_Locator_ID?.identifier || r.M_Locator_ID?.Value || '',
-    toLocator: r.M_LocatorTo_ID?.identifier || r.M_LocatorTo_ID?.Value || '',
+    fromLocator: extractName(r.M_Locator_ID, '未知位置'),
+    toLocator: extractName(r.M_LocatorTo_ID, '未知位置'),
   }))
 }
 

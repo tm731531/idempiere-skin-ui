@@ -117,6 +117,19 @@ const router = createRouter({
         },
       ],
     },
+    // 管理模組
+    {
+      path: '/admin/doctors',
+      name: 'doctor-manage',
+      component: () => import('@/views/admin/DoctorManageView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/admin/nhi',
+      name: 'nhi-setup',
+      component: () => import('@/views/admin/NhiSetupView.vue'),
+      meta: { requiresAuth: true },
+    },
     // 404
     {
       path: '/:pathMatch(.*)*',

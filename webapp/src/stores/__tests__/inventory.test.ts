@@ -295,7 +295,7 @@ describe('Inventory Store', () => {
     })
 
     it('executes batch transfer and clears lines', async () => {
-      vi.mocked(inventoryApi.createBatchTransfer).mockResolvedValue(700)
+      vi.mocked(inventoryApi.createBatchTransfer).mockResolvedValue({ movementId: 700, completed: true })
       vi.mocked(inventoryApi.listStock).mockResolvedValue([])
 
       const store = useInventoryStore()

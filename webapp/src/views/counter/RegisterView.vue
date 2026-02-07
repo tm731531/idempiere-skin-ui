@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useRegistrationStore } from '@/stores/registration'
 import { TAG_DISPLAY, type PatientTag } from '@/api/registration'
+import { readNhiCard, type NhiCard } from '@/api/nhi'
 
+const router = useRouter()
 const store = useRegistrationStore()
+
+// NHI card reader
+const isReadingCard = ref(false)
+const nhiCardInfo = ref<NhiCard | null>(null)
+const nhiError = ref<string | null>(null)
 
 // 本地狀態
 const taxIdInput = ref('')
@@ -66,6 +74,32 @@ async function searchPatient() {
     phoneInput.value = ''
   } else {
     showNewPatientForm.value = false
+  }
+}
+
+// 讀取健保卡
+async function handleReadCard() {
+  isReadingCard.value = true
+  nhiError.value = null
+  nhiCardInfo.value = null
+  try {
+    const card = await readNhiCard()
+    nhiCardInfo.value = card
+    // Auto-fill TaxID and trigger search
+    taxIdInput.value = card.idNo
+    const patient = await store.findPatient(card.idNo)
+    if (!patient) {
+      // New patient — pre-fill name from card
+      showNewPatientForm.value = true
+      nameInput.value = card.fullName
+      phoneInput.value = ''
+    } else {
+      showNewPatientForm.value = false
+    }
+  } catch (e: any) {
+    nhiError.value = e.message || '讀取健保卡失敗'
+  } finally {
+    isReadingCard.value = false
   }
 }
 
@@ -135,6 +169,16 @@ const availableDoctors = computed(() =>
         <button class="btn btn-primary" @click="searchPatient" :disabled="store.isSearchingPatient">
           {{ store.isSearchingPatient ? '搜尋中...' : '查詢' }}
         </button>
+      </div>
+      <button class="btn btn-nhi" @click="handleReadCard" :disabled="isReadingCard">
+        {{ isReadingCard ? '讀取中...' : '讀取健保卡' }}
+      </button>
+      <div v-if="nhiCardInfo" class="nhi-card-info">
+        {{ nhiCardInfo.fullName }} | {{ nhiCardInfo.idNo }} | {{ nhiCardInfo.birthDate }} | {{ nhiCardInfo.sex === 'M' ? '男' : '女' }}
+      </div>
+      <div v-if="nhiError" class="nhi-error">
+        {{ nhiError }}
+        <button v-if="nhiError.includes('服務')" class="btn-link" @click="router.push('/admin/nhi')">前往設定</button>
       </div>
     </div>
 
@@ -554,4 +598,12 @@ const availableDoctors = computed(() =>
 .tag-label { font-size: 0.75rem; color: #666; margin-top: 0.25rem; }
 
 .btn-full { width: 100%; }
+
+/* NHI card reader */
+.btn-nhi { width: 100%; margin-top: 0.5rem; background: #1565c0; color: white; border-color: #1565c0; padding: 0.75rem; border-radius: 0.5rem; font-size: 1rem; cursor: pointer; min-height: 48px; border: none; }
+.btn-nhi:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-nhi:active:not(:disabled) { background: #0d47a1; }
+.nhi-card-info { margin-top: 0.5rem; padding: 0.625rem 0.75rem; background: #e3f2fd; color: #1565c0; border-radius: 0.375rem; font-size: 0.875rem; }
+.nhi-error { margin-top: 0.5rem; padding: 0.625rem 0.75rem; background: #ffebee; color: #c62828; border-radius: 0.375rem; font-size: 0.875rem; }
+.btn-link { background: none; border: none; color: #1565c0; text-decoration: underline; cursor: pointer; font-size: 0.875rem; padding: 0; margin-left: 0.5rem; }
 </style>

@@ -4,11 +4,17 @@ import { useInventoryStore } from '@/stores/inventory'
 
 const store = useInventoryStore()
 const searchKeyword = ref('')
+const showZeroStock = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(async () => {
   await store.loadStock()
 })
+
+function onToggleZeroStock() {
+  store.showZeroStock = showZeroStock.value
+  store.loadStock(searchKeyword.value || undefined)
+}
 
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
@@ -66,6 +72,12 @@ const groupedStock = computed(() => {
         @input="onSearchInput"
       />
     </div>
+    <div class="toggle-bar">
+      <label class="toggle-label">
+        <input type="checkbox" v-model="showZeroStock" @change="onToggleZeroStock" />
+        <span>顯示零庫存產品</span>
+      </label>
+    </div>
 
     <div v-if="store.isLoadingStock" class="loading">載入中...</div>
     <div v-else-if="groupedStock.length === 0" class="empty">
@@ -92,7 +104,10 @@ const groupedStock = computed(() => {
 
 <style scoped>
 .stock-view { max-width: 600px; margin: 0 auto; }
-.search-bar { margin-bottom: 1rem; }
+.search-bar { margin-bottom: 0.5rem; }
+.toggle-bar { margin-bottom: 1rem; }
+.toggle-label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: #666; cursor: pointer; }
+.toggle-label input[type="checkbox"] { width: 18px; height: 18px; accent-color: #795548; }
 .input { width: 100%; padding: 0.75rem 1rem; border: 1px solid #ddd; border-radius: 0.5rem; font-size: 1rem; min-height: 48px; box-sizing: border-box; }
 .input:focus { outline: none; border-color: #795548; }
 

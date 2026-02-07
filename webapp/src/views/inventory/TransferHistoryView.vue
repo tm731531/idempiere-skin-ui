@@ -93,7 +93,7 @@ function formatDate(dateStr: string): string {
             <div v-for="(line, i) in expandedLines" :key="i" class="line-row">
               <div class="line-product">{{ line.productName }}</div>
               <div class="line-detail">
-                <span class="line-qty">{{ line.quantity }}</span>
+                <span class="line-qty">數量: {{ line.quantity }}</span>
                 <span class="line-route">{{ line.fromLocator }} → {{ line.toLocator }}</span>
               </div>
             </div>

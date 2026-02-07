@@ -66,12 +66,18 @@ export const usePurchaseStore = defineStore('purchase', () => {
   }
 
   function addLine(product: { id: number; name: string }, quantity: number, price: number): void {
-    orderLines.value.push({
-      productId: product.id,
-      productName: product.name,
-      quantity,
-      price,
-    })
+    const existing = orderLines.value.find(l => l.productId === product.id)
+    if (existing) {
+      existing.quantity += quantity
+      existing.price = price
+    } else {
+      orderLines.value.push({
+        productId: product.id,
+        productName: product.name,
+        quantity,
+        price,
+      })
+    }
   }
 
   function removeLine(index: number): void {

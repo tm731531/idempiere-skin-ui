@@ -68,14 +68,26 @@ describe('getVendorLocationId', () => {
     mockGet.mockResolvedValue({
       data: { records: [{ id: 109 }] },
     })
-    const result = await getVendorLocationId(1000)
+    const result = await getVendorLocationId(1000, 11)
     expect(result).toBe(109)
   })
 
-  it('returns 0 when no location found', async () => {
+  it('auto-creates location when none found', async () => {
     mockGet.mockResolvedValue({ data: { records: [] } })
-    const result = await getVendorLocationId(1000)
-    expect(result).toBe(0)
+    mockPost
+      .mockResolvedValueOnce({ data: { id: 500 } }) // C_Location
+      .mockResolvedValueOnce({ data: { id: 501 } }) // C_BPartner_Location
+    const result = await getVendorLocationId(1000, 11)
+    expect(result).toBe(501)
+    // Created C_Location with Taiwan country
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/C_Location', expect.objectContaining({
+      'C_Country_ID': 316,
+    }))
+    // Created C_BPartner_Location linking vendor
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/C_BPartner_Location', expect.objectContaining({
+      'C_BPartner_ID': 1000,
+      'C_Location_ID': 500,
+    }))
   })
 })
 
@@ -124,16 +136,28 @@ describe('createPurchaseOrder', () => {
     })
   })
 
-  it('throws when vendor has no location', async () => {
+  it('auto-creates vendor location when missing and proceeds', async () => {
     mockGet.mockResolvedValue({ data: { records: [] } })
+    mockPost
+      .mockResolvedValueOnce({ data: { id: 500 } }) // C_Location auto-create
+      .mockResolvedValueOnce({ data: { id: 501 } }) // C_BPartner_Location auto-create
+      .mockResolvedValueOnce({ data: { id: 800, DocumentNo: 'PO-102' } }) // Order header
+      .mockResolvedValueOnce({ data: { id: 801 } }) // Order line
+    mockPut.mockResolvedValue({ data: {} })
 
-    await expect(createPurchaseOrder({
+    const result = await createPurchaseOrder({
       vendorId: 1000,
       lines: [{ productId: 100, productName: 'X', quantity: 1, price: 1 }],
       orgId: 11,
       warehouseId: 2000,
       username: 'admin',
-    })).rejects.toThrow('供應商尚未設定地址')
+    })
+
+    expect(result).toEqual({ id: 800, documentNo: 'PO-102' })
+    // Location auto-created
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/C_Location', expect.objectContaining({
+      'C_Country_ID': 316,
+    }))
   })
 
   it('skips lines with quantity <= 0', async () => {

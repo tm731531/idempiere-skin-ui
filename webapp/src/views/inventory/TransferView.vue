@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useInventoryStore } from '@/stores/inventory'
 import { useAuthStore } from '@/stores/auth'
 import { findProductByBarcode } from '@/api/product'
+import { getStockAtLocator } from '@/api/inventory'
 import ProductCreateModal from '@/components/ProductCreateModal.vue'
 import BarcodeInput from '@/components/BarcodeInput.vue'
 
@@ -24,7 +25,8 @@ const searchKeyword = ref('')
 const isSearching = ref(false)
 const hasSearched = ref(false)
 
-// Add-item quantity (set in search modal before confirming)
+// Pending product selection (2-step: select → confirm qty)
+const pendingProduct = ref<{ id: number; name: string } | null>(null)
 const addQuantity = ref(1)
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -67,10 +69,16 @@ function onSearchInput() {
   }, 300)
 }
 
-function addProduct(product: { id: number; name: string }) {
+function selectProduct(product: { id: number; name: string }) {
+  pendingProduct.value = product
+  addQuantity.value = 1
+}
+
+function confirmAdd() {
+  if (!pendingProduct.value) return
   const qty = addQuantity.value > 0 ? addQuantity.value : 1
-  store.addBatchLine(product, qty)
-  // Reset for next item
+  store.addBatchLine(pendingProduct.value, qty)
+  pendingProduct.value = null
   addQuantity.value = 1
   searchKeyword.value = ''
   store.transferProducts = []
@@ -78,12 +86,16 @@ function addProduct(product: { id: number; name: string }) {
   showSearch.value = false
 }
 
+function cancelPending() {
+  pendingProduct.value = null
+  addQuantity.value = 1
+}
+
 async function onBarcodeScan(barcode: string) {
   // Try to find product by barcode
   const product = await findProductByBarcode(barcode)
   if (product) {
-    store.addBatchLine(product, 1)
-    showSearch.value = false
+    selectProduct(product)
   } else {
     // Not found — offer to create, pre-filling barcode as search keyword
     searchKeyword.value = barcode
@@ -115,6 +127,27 @@ async function doTransfer() {
   if (store.batchLines.length === 0) {
     alert('請至少加入一項藥品')
     return
+  }
+
+  // Validate stock at source locator
+  try {
+    const productIds = store.batchLines.map(l => l.productId)
+    const stockMap = await getStockAtLocator(fromLocatorId.value, productIds)
+
+    const insufficient: string[] = []
+    for (const line of store.batchLines) {
+      const available = stockMap[line.productId] || 0
+      if (line.quantity > available) {
+        insufficient.push(`${line.productName}: 需要 ${line.quantity}，庫存只有 ${available}`)
+      }
+    }
+
+    if (insufficient.length > 0) {
+      alert(`庫存不足：\n${insufficient.join('\n')}`)
+      return
+    }
+  } catch {
+    // If stock check fails, still allow transfer (non-critical)
   }
 
   const success = await store.executeBatchTransfer(
@@ -215,28 +248,41 @@ async function doTransfer() {
               @input="onSearchInput"
             />
           </div>
-          <div v-if="isSearching" class="search-status">搜尋中...</div>
-          <div v-else-if="hasSearched && store.transferProducts.length === 0" class="search-status">
-            找不到符合的藥品
-            <button class="btn btn-link" @click="openCreateProduct">快速建立產品</button>
-          </div>
-          <div class="result-list">
-            <div v-for="p in store.transferProducts" :key="p.id" class="result-item" @click="addProduct(p)">
-              <div class="result-info">
-                <div class="result-name">{{ p.name }}</div>
-                <div class="result-code">{{ p.value }}</div>
-              </div>
-              <div class="result-action">
-                <input
-                  v-model.number="addQuantity"
-                  type="number"
-                  min="1"
-                  class="qty-inline"
-                  @click.stop
-                />
-              </div>
+          <!-- Pending product: confirm quantity -->
+          <div v-if="pendingProduct" class="pending-confirm">
+            <div class="pending-name">{{ pendingProduct.name }}</div>
+            <div class="pending-qty-row">
+              <label>數量</label>
+              <input
+                v-model.number="addQuantity"
+                type="number"
+                min="1"
+                class="input input-qty"
+                autofocus
+              />
+            </div>
+            <div class="pending-actions">
+              <button class="btn btn-sm" @click="cancelPending">取消</button>
+              <button class="btn btn-sm btn-primary" @click="confirmAdd" :disabled="addQuantity <= 0">加入</button>
             </div>
           </div>
+          <!-- Search results -->
+          <template v-else>
+            <div v-if="isSearching" class="search-status">搜尋中...</div>
+            <div v-else-if="hasSearched && store.transferProducts.length === 0" class="search-status">
+              找不到符合的藥品
+              <button class="btn btn-link" @click="openCreateProduct">快速建立產品</button>
+            </div>
+            <div class="result-list">
+              <div v-for="p in store.transferProducts" :key="p.id" class="result-item" @click="selectProduct(p)">
+                <div class="result-info">
+                  <div class="result-name">{{ p.name }}</div>
+                  <div class="result-code">{{ p.value }}</div>
+                </div>
+                <div class="result-action">+</div>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -303,7 +349,12 @@ async function doTransfer() {
 .result-name { font-weight: 500; }
 .result-code { font-size: 0.75rem; color: #999; }
 .result-action { margin-left: 0.75rem; }
-.qty-inline { width: 4rem; padding: 0.5rem; border: 1px solid #ddd; border-radius: 0.25rem; text-align: center; font-size: 1rem; }
+.pending-confirm { padding: 1rem 0; }
+.pending-name { font-weight: 600; font-size: 1.125rem; margin-bottom: 0.75rem; }
+.pending-qty-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.pending-qty-row label { font-size: 0.875rem; color: #666; white-space: nowrap; }
+.input-qty { width: 6rem; text-align: center; }
+.pending-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
 
 .error-message { background: #ffebee; color: #c62828; padding: 1rem; border-radius: 0.5rem; margin-top: 0.5rem; }
 .error-banner { background: #fff3e0; color: #e65100; padding: 0.75rem 1rem; border-radius: 0.5rem; margin-bottom: 0.75rem; text-align: center; font-size: 0.875rem; }

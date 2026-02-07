@@ -129,7 +129,6 @@ export async function createPatient(data: {
     'Value': value,
     'Name': data.name,
     'TaxID': data.taxId,
-    'Phone': data.phone || '',
     'C_BP_Group_ID': bpGroupId,
     'IsCustomer': true,
     'IsVendor': false,
@@ -139,6 +138,8 @@ export async function createPatient(data: {
     'IsOneTime': false,
     'SendEMail': false,
     'IsActive': true,
+    'SO_CreditLimit': 0,
+    'SO_CreditUsed': 0,
   })
 
   return {
