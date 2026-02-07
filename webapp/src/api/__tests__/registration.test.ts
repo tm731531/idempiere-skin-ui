@@ -14,6 +14,8 @@ import {
   startConsultation,
   completeConsultation,
   cancelRegistration,
+  getPatientTags,
+  setPatientTags,
 } from '../registration'
 import { apiClient } from '../client'
 
@@ -239,5 +241,64 @@ describe('status update functions', () => {
     expect(mockPut).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig/888', {
       'Value': 'CANCELLED',
     })
+  })
+})
+
+describe('getPatientTags', () => {
+  it('returns parsed tags from AD_SysConfig Value', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          { Value: JSON.stringify({ tags: ['VIP', 'Allergy'] }) },
+        ],
+      },
+    })
+
+    const result = await getPatientTags(123)
+    expect(result).toEqual(['VIP', 'Allergy'])
+  })
+
+  it('returns empty array when no record found', async () => {
+    mockGet.mockResolvedValue({ data: { records: [] } })
+    const result = await getPatientTags(999)
+    expect(result).toEqual([])
+  })
+
+  it('returns empty array on API error', async () => {
+    mockGet.mockRejectedValue(new Error('Network error'))
+    const result = await getPatientTags(123)
+    expect(result).toEqual([])
+  })
+})
+
+describe('setPatientTags', () => {
+  it('updates existing record when found', async () => {
+    mockGet.mockResolvedValue({
+      data: { records: [{ id: 555 }] },
+    })
+    mockPut.mockResolvedValue({ data: {} })
+
+    await setPatientTags(123, ['VIP', 'Chronic'], 11)
+
+    expect(mockPut).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig/555', {
+      'Value': JSON.stringify({ tags: ['VIP', 'Chronic'] }),
+    })
+    expect(mockPost).not.toHaveBeenCalled()
+  })
+
+  it('creates new record when not found', async () => {
+    mockGet.mockResolvedValue({ data: { records: [] } })
+    mockPost.mockResolvedValue({ data: {} })
+
+    await setPatientTags(123, ['Allergy'], 11)
+
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig', {
+      'AD_Org_ID': 11,
+      'Name': 'CLINIC_PATIENT_TAGS_123',
+      'Value': JSON.stringify({ tags: ['Allergy'] }),
+      'Description': 'Patient tags',
+      'ConfigurationLevel': 'S',
+    })
+    expect(mockPut).not.toHaveBeenCalled()
   })
 })

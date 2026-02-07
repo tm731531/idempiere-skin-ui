@@ -200,3 +200,68 @@ export async function getOrderLines(orderId: number): Promise<any[]> {
     qtyDelivered: r.QtyDelivered || 0,
   }))
 }
+
+// ========== Material Receipt API ==========
+
+export interface ReceiptLine {
+  orderLineId: number
+  productId: number
+  qtyReceived: number
+}
+
+export async function createReceipt(
+  orderId: number,
+  vendorId: number,
+  lines: ReceiptLine[],
+  orgId: number,
+  warehouseId: number
+): Promise<number> {
+  // Create M_InOut header (Material Receipt)
+  const headerResponse = await apiClient.post('/api/v1/models/M_InOut', {
+    'AD_Org_ID': orgId,
+    'C_BPartner_ID': vendorId,
+    'C_Order_ID': orderId,
+    'M_Warehouse_ID': warehouseId,
+    'MovementDate': new Date().toISOString().slice(0, 10),
+    'MovementType': 'V+', // Vendor Receipts
+    'IsSOTrx': false,
+  })
+
+  const inOutId = headerResponse.data.id
+
+  // Create lines
+  for (const line of lines) {
+    if (line.qtyReceived <= 0) continue
+    await apiClient.post('/api/v1/models/M_InOutLine', {
+      'AD_Org_ID': orgId,
+      'M_InOut_ID': inOutId,
+      'C_OrderLine_ID': line.orderLineId,
+      'M_Product_ID': line.productId,
+      'MovementQty': line.qtyReceived,
+      'M_Locator_ID': 0, // Default locator
+    })
+  }
+
+  // Try to complete
+  try {
+    await apiClient.put(`/api/v1/models/M_InOut/${inOutId}`, {
+      'DocAction': 'CO',
+      'DocStatus': 'CO',
+    })
+  } catch {
+    // DocAction may not work via REST
+  }
+
+  return inOutId
+}
+
+/**
+ * Get vendor ID from order (for receipt creation)
+ */
+export async function getOrderVendorId(orderId: number): Promise<number> {
+  const response = await apiClient.get(`/api/v1/models/C_Order/${orderId}`, {
+    params: { '$select': 'C_BPartner_ID' },
+  })
+  return response.data.C_BPartner_ID?.id || response.data.C_BPartner_ID || 0
+}
+

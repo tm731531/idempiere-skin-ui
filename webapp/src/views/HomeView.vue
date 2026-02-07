@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 
@@ -10,18 +11,51 @@ interface MenuItem {
   icon: string
   path: string
   color: string
+  roles?: string[]
 }
 
-const menuItems: MenuItem[] = [
-  { title: '掛號', icon: '📋', path: '/counter/register', color: '#4CAF50' },
-  { title: '叫號', icon: '📢', path: '/counter/queue', color: '#2196F3' },
-  { title: '看診', icon: '👨‍⚕️', path: '/doctor/consult', color: '#9C27B0' },
-  { title: '配藥', icon: '💊', path: '/pharmacy/dispense', color: '#FF9800' },
-  { title: '結帳', icon: '💰', path: '/counter/checkout', color: '#F44336' },
-  { title: '庫存', icon: '📦', path: '/inventory/stock', color: '#795548' },
-  { title: '調撥', icon: '🔄', path: '/inventory/transfer', color: '#607D8B' },
-  { title: '入庫', icon: '📥', path: '/inventory/receive', color: '#00BCD4' },
+const allMenuItems: MenuItem[] = [
+  { title: '掛號', icon: '📋', path: '/counter/register', color: '#4CAF50', roles: ['counter', 'admin'] },
+  { title: '叫號', icon: '📢', path: '/counter/queue', color: '#2196F3', roles: ['counter', 'admin'] },
+  { title: '看診', icon: '👨‍⚕️', path: '/doctor/consult', color: '#9C27B0', roles: ['doctor', 'admin'] },
+  { title: '處方', icon: '📝', path: '/doctor/prescription', color: '#7B1FA2', roles: ['doctor', 'admin'] },
+  { title: '配藥', icon: '💊', path: '/pharmacy/dispense', color: '#FF9800', roles: ['pharmacy', 'admin'] },
+  { title: '結帳', icon: '💰', path: '/counter/checkout', color: '#F44336', roles: ['counter', 'admin'] },
+  { title: '庫存', icon: '📦', path: '/inventory/stock', color: '#795548', roles: ['warehouse', 'admin'] },
+  { title: '調撥', icon: '🔄', path: '/inventory/transfer', color: '#607D8B', roles: ['warehouse', 'admin'] },
+  { title: '入庫', icon: '📥', path: '/inventory/receive', color: '#00BCD4', roles: ['warehouse', 'admin'] },
+  { title: '盤點', icon: '📊', path: '/inventory/count', color: '#5D4037', roles: ['warehouse', 'admin'] },
 ]
+
+// Role keyword to category mapping
+const ROLE_MAP: Record<string, string> = {
+  'counter': 'counter',
+  'clerk': 'counter',
+  '櫃檯': 'counter',
+  'doctor': 'doctor',
+  '醫師': 'doctor',
+  'pharmacy': 'pharmacy',
+  '藥師': 'pharmacy',
+  'warehouse': 'warehouse',
+  '倉庫': 'warehouse',
+  'admin': 'admin',
+  'superuser': 'admin',
+  'system administrator': 'admin',
+}
+
+function getUserRoleCategory(): string | null {
+  const roleName = (authStore.user?.role || '').toLowerCase()
+  for (const [keyword, category] of Object.entries(ROLE_MAP)) {
+    if (roleName.includes(keyword)) return category
+  }
+  return null // Unknown role → show all
+}
+
+const menuItems = computed(() => {
+  const category = getUserRoleCategory()
+  if (!category) return allMenuItems
+  return allMenuItems.filter(item => !item.roles || item.roles.includes(category))
+})
 
 function navigateTo(path: string) {
   router.push(path)
@@ -38,7 +72,9 @@ function handleLogout() {
     <header class="home-header">
       <h1>醫療診所系統</h1>
       <div class="user-info">
-        <span>{{ authStore.user?.name || '使用者' }}</span>
+        <span>{{ authStore.user?.name || '使用者' }}
+          <span v-if="authStore.user?.role" class="role-badge">{{ authStore.user.role }}</span>
+        </span>
         <button @click="handleLogout" class="logout-btn">登出</button>
       </div>
     </header>
@@ -167,5 +203,15 @@ function handleLogout() {
   text-align: center;
   color: #999;
   font-size: 0.875rem;
+}
+
+.role-badge {
+  display: inline-block;
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
 }
 </style>

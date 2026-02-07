@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useDoctorStore } from '@/stores/doctor'
 import { useRegistrationStore } from '@/stores/registration'
+import { TAG_DISPLAY } from '@/api/registration'
 
 const doctorStore = useDoctorStore()
 const regStore = useRegistrationStore()
@@ -23,6 +24,7 @@ onMounted(async () => {
   await regStore.loadDoctors()
   await regStore.loadTodayRegistrations()
   await doctorStore.loadMedicines()
+  loadConsultingTags()
 
   refreshInterval = window.setInterval(() => {
     regStore.loadTodayRegistrations()
@@ -32,6 +34,18 @@ onMounted(async () => {
 onUnmounted(() => {
   if (refreshInterval) clearInterval(refreshInterval)
 })
+
+// Load tags for consulting patients
+function loadConsultingTags() {
+  const patientIds = new Set(regStore.consultingList.map(r => r.patientId).filter(id => id > 0))
+  for (const id of patientIds) {
+    regStore.loadPatientTags(id)
+  }
+}
+
+function getPatientTags(patientId: number) {
+  return regStore.patientTags[patientId] || []
+}
 
 // Waiting count color
 const waitingColor = computed(() => {
@@ -139,7 +153,10 @@ async function callNext() {
           >
             <div class="queue-num">{{ reg.queueNumber }}</div>
             <div class="patient-info">
-              <div class="name">{{ reg.patientName }}</div>
+              <div class="name">
+                {{ reg.patientName }}
+                <span v-for="tag in getPatientTags(reg.patientId)" :key="tag" class="tag-badge" :title="TAG_DISPLAY[tag].label">{{ TAG_DISPLAY[tag].icon }}</span>
+              </div>
               <div class="detail">{{ reg.patientTaxId }}</div>
             </div>
             <div class="arrow">→</div>
@@ -153,7 +170,12 @@ async function callNext() {
       <!-- Patient info -->
       <div class="section patient-header">
         <div class="patient-main">
-          <div class="patient-name">{{ doctorStore.currentPatientName }}</div>
+          <div class="patient-name">
+            {{ doctorStore.currentPatientName }}
+            <template v-for="reg in regStore.todayRegistrations.filter(r => r.id === doctorStore.currentAssignmentId)" :key="reg.id">
+              <span v-for="tag in getPatientTags(reg.patientId)" :key="tag" class="tag-badge" :title="TAG_DISPLAY[tag].label">{{ TAG_DISPLAY[tag].icon }}</span>
+            </template>
+          </div>
           <div class="patient-id">{{ doctorStore.currentPatientTaxId }}</div>
         </div>
         <button class="btn btn-text" @click="doctorStore.clearConsultation()">✕</button>
@@ -544,4 +566,5 @@ async function callNext() {
 
 .loading, .empty { text-align: center; padding: 2rem; color: #666; }
 .error-message { background: #ffebee; color: #c62828; padding: 1rem; border-radius: 0.5rem; margin-top: 0.5rem; }
+.tag-badge { font-size: 0.875rem; margin-left: 0.25rem; }
 </style>

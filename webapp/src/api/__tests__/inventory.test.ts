@@ -2,7 +2,7 @@
  * Inventory API Unit Tests
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { listStock, searchProducts, createTransfer, listWarehouses, listPurchaseOrders, getOrderLines } from '../inventory'
+import { listStock, searchProducts, createTransfer, listWarehouses, listPurchaseOrders, getOrderLines, createReceipt, getOrderVendorId } from '../inventory'
 import { apiClient } from '../client'
 
 vi.mock('../client', () => ({

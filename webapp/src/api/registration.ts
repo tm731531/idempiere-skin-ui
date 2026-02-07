@@ -460,3 +460,57 @@ export async function completeConsultation(registrationId: number, orgId: number
 export async function cancelRegistration(registrationId: number, orgId: number): Promise<void> {
   await setRegistrationStatus(registrationId, 'CANCELLED', orgId)
 }
+
+// ========== Patient Tags API ==========
+
+const TAG_PREFIX = 'CLINIC_PATIENT_TAGS_'
+
+export type PatientTag = 'WARNING' | 'ALLERGY' | 'VIP' | 'CHRONIC' | 'DEBT'
+
+export const TAG_DISPLAY: Record<PatientTag, { icon: string; label: string }> = {
+  'WARNING': { icon: '⚠️', label: '注意' },
+  'ALLERGY': { icon: '💊', label: '過敏' },
+  'VIP':     { icon: '❤️', label: 'VIP' },
+  'CHRONIC': { icon: '🔄', label: '慢性' },
+  'DEBT':    { icon: '💰', label: '欠款' },
+}
+
+export async function getPatientTags(patientId: number): Promise<PatientTag[]> {
+  const configName = `${TAG_PREFIX}${patientId}`
+  try {
+    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
+      params: { '$filter': `Name eq '${configName}'` },
+    })
+    const records = response.data.records || []
+    if (records.length === 0) return []
+    return JSON.parse(records[0].Value) as PatientTag[]
+  } catch {
+    return []
+  }
+}
+
+export async function setPatientTags(
+  patientId: number,
+  tags: PatientTag[],
+  orgId: number
+): Promise<void> {
+  const configName = `${TAG_PREFIX}${patientId}`
+  const value = JSON.stringify(tags)
+
+  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
+    params: { '$filter': `Name eq '${configName}'` },
+  })
+
+  const records = response.data.records || []
+  if (records.length > 0) {
+    await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, { 'Value': value })
+  } else {
+    await apiClient.post('/api/v1/models/AD_SysConfig', {
+      'AD_Org_ID': orgId,
+      'Name': configName,
+      'Value': value,
+      'Description': 'Patient tags',
+      'ConfigurationLevel': 'S',
+    })
+  }
+}

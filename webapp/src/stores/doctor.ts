@@ -11,10 +11,16 @@ import { useRegistrationStore } from './registration'
 import {
   type Medicine,
   type PrescriptionLine,
+  type Prescription,
+  type PrescriptionTemplate,
   searchMedicines,
   listMedicines,
   savePrescription,
   loadPrescription,
+  listPrescriptionHistory,
+  listTemplates,
+  saveTemplate,
+  deleteTemplate,
   calculateTotalQuantity,
 } from '@/api/doctor'
 
@@ -40,6 +46,11 @@ export const useDoctorStore = defineStore('doctor', () => {
   const medicines = ref<Medicine[]>([])
   const searchResults = ref<Medicine[]>([])
   const isSearching = ref(false)
+
+  // Templates & History
+  const templates = ref<PrescriptionTemplate[]>([])
+  const prescriptionHistory = ref<Prescription[]>([])
+  const isLoadingHistory = ref(false)
 
   // Loading states
   const isLoading = ref(false)
@@ -221,6 +232,62 @@ export const useDoctorStore = defineStore('doctor', () => {
     return true
   }
 
+  // ========== History & Templates ==========
+
+  async function loadHistory(): Promise<void> {
+    isLoadingHistory.value = true
+    error.value = null
+    try {
+      prescriptionHistory.value = await listPrescriptionHistory()
+    } catch (e: any) {
+      error.value = e.message || 'Failed to load history'
+    } finally {
+      isLoadingHistory.value = false
+    }
+  }
+
+  async function loadTemplateList(): Promise<void> {
+    try {
+      templates.value = await listTemplates()
+    } catch (e: any) {
+      error.value = e.message || 'Failed to load templates'
+    }
+  }
+
+  async function saveCurrentAsTemplate(name: string): Promise<boolean> {
+    if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
+      error.value = 'Organization not set'
+      return false
+    }
+    if (prescriptionLines.value.length === 0) {
+      error.value = 'No medicines to save as template'
+      return false
+    }
+
+    try {
+      await saveTemplate(name, prescriptionLines.value, totalDays.value, authStore.context!.organizationId)
+      await loadTemplateList()
+      return true
+    } catch (e: any) {
+      error.value = e.message || 'Failed to save template'
+      return false
+    }
+  }
+
+  async function removeTemplate(configName: string): Promise<void> {
+    try {
+      await deleteTemplate(configName)
+      templates.value = templates.value.filter(t => t.id !== configName)
+    } catch (e: any) {
+      error.value = e.message || 'Failed to delete template'
+    }
+  }
+
+  function applyTemplate(template: PrescriptionTemplate): void {
+    prescriptionLines.value = template.lines.map(line => ({ ...line }))
+    totalDays.value = template.totalDays
+  }
+
   /**
    * Clear current consultation
    */
@@ -253,6 +320,9 @@ export const useDoctorStore = defineStore('doctor', () => {
     isLoading,
     isSaving,
     error,
+    templates,
+    prescriptionHistory,
+    isLoadingHistory,
 
     // Getters
     hasCurrentPatient,
@@ -270,5 +340,10 @@ export const useDoctorStore = defineStore('doctor', () => {
     save,
     completeConsultation,
     clearConsultation,
+    loadHistory,
+    loadTemplateList,
+    saveCurrentAsTemplate,
+    removeTemplate,
+    applyTemplate,
   }
 })

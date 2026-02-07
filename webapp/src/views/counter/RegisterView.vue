@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRegistrationStore } from '@/stores/registration'
+import { TAG_DISPLAY, type PatientTag } from '@/api/registration'
 
 const store = useRegistrationStore()
 
@@ -9,6 +10,43 @@ const taxIdInput = ref('')
 const nameInput = ref('')
 const phoneInput = ref('')
 const showNewPatientForm = ref(false)
+
+// Patient tags
+const showTagEditor = ref(false)
+const editingTags = ref<PatientTag[]>([])
+const allTags: PatientTag[] = ['WARNING', 'ALLERGY', 'VIP', 'CHRONIC', 'DEBT']
+
+// Load tags when patient is found
+watch(() => store.currentPatient, async (patient) => {
+  if (patient) {
+    await store.loadPatientTags(patient.id)
+  }
+})
+
+const currentTags = computed(() => {
+  if (!store.currentPatient) return []
+  return store.patientTags[store.currentPatient.id] || []
+})
+
+function openTagEditor() {
+  editingTags.value = [...currentTags.value]
+  showTagEditor.value = true
+}
+
+function toggleTag(tag: PatientTag) {
+  const idx = editingTags.value.indexOf(tag)
+  if (idx >= 0) {
+    editingTags.value.splice(idx, 1)
+  } else {
+    editingTags.value.push(tag)
+  }
+}
+
+async function saveTagEdits() {
+  if (!store.currentPatient) return
+  await store.updatePatientTags(store.currentPatient.id, editingTags.value)
+  showTagEditor.value = false
+}
 
 // 載入醫師清單
 onMounted(async () => {
@@ -107,12 +145,23 @@ const availableDoctors = computed(() =>
       <!-- 已找到病人 -->
       <div v-if="store.currentPatient" class="patient-card">
         <div class="patient-info">
-          <div class="patient-name">{{ store.currentPatient.name }}</div>
+          <div class="patient-name">
+            {{ store.currentPatient.name }}
+            <span
+              v-for="tag in currentTags"
+              :key="tag"
+              class="tag-badge"
+              :title="TAG_DISPLAY[tag].label"
+            >{{ TAG_DISPLAY[tag].icon }}</span>
+          </div>
           <div class="patient-detail">
             <span>身分證: {{ store.currentPatient.taxId }}</span>
             <span v-if="store.currentPatient.phone">電話: {{ store.currentPatient.phone }}</span>
           </div>
-          <div class="patient-id">病歷號: {{ store.currentPatient.value }}</div>
+          <div class="patient-id">
+            病歷號: {{ store.currentPatient.value }}
+            <button class="btn-tag-edit" @click="openTagEditor">標記</button>
+          </div>
         </div>
         <button class="btn btn-text" @click="clearAll">✕</button>
       </div>
@@ -191,6 +240,31 @@ const availableDoctors = computed(() =>
       <div class="stat-item">
         <div class="stat-value">{{ store.completedList.length }}</div>
         <div class="stat-label">已完成</div>
+      </div>
+    </div>
+
+    <!-- Tag editor modal -->
+    <div v-if="showTagEditor" class="modal-overlay" @click.self="showTagEditor = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>編輯病人標記</h3>
+          <button class="btn btn-text" @click="showTagEditor = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="tag-grid">
+            <button
+              v-for="tag in allTags"
+              :key="tag"
+              class="tag-option"
+              :class="{ active: editingTags.includes(tag) }"
+              @click="toggleTag(tag)"
+            >
+              <span class="tag-icon">{{ TAG_DISPLAY[tag].icon }}</span>
+              <span class="tag-label">{{ TAG_DISPLAY[tag].label }}</span>
+            </button>
+          </div>
+          <button class="btn btn-primary btn-full" @click="saveTagEdits">儲存</button>
+        </div>
       </div>
     </div>
   </div>
@@ -401,4 +475,83 @@ const availableDoctors = computed(() =>
   font-size: 0.75rem;
   color: #666;
 }
+
+/* Tag badges */
+.tag-badge {
+  font-size: 0.875rem;
+  margin-left: 0.25rem;
+}
+
+.btn-tag-edit {
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  color: #666;
+  cursor: pointer;
+  margin-left: 0.5rem;
+}
+
+.btn-tag-edit:active {
+  background: #eee;
+}
+
+/* Tag editor modal */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+}
+
+.modal {
+  background: white;
+  width: 100%;
+  border-radius: 1rem 1rem 0 0;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h3 { margin: 0; }
+
+.modal-body { padding: 1rem; }
+
+.tag-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tag-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 0.5rem;
+  background: white;
+  cursor: pointer;
+  min-height: 60px;
+  justify-content: center;
+}
+
+.tag-option.active {
+  border-color: #4CAF50;
+  background: #e8f5e9;
+}
+
+.tag-icon { font-size: 1.5rem; }
+.tag-label { font-size: 0.75rem; color: #666; margin-top: 0.25rem; }
+
+.btn-full { width: 100%; }
 </style>

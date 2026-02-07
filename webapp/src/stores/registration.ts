@@ -11,6 +11,7 @@ import {
   type Patient,
   type Doctor,
   type Registration,
+  type PatientTag,
   findPatientByTaxId,
   searchPatients,
   createPatient,
@@ -23,6 +24,8 @@ import {
   startConsultation,
   completeConsultation,
   cancelRegistration,
+  getPatientTags,
+  setPatientTags,
 } from '@/api/registration'
 
 export const useRegistrationStore = defineStore('registration', () => {
@@ -352,6 +355,36 @@ export const useRegistrationStore = defineStore('registration', () => {
     return next
   }
 
+  // ========== Patient Tags ==========
+
+  const patientTags = ref<Record<number, PatientTag[]>>({})
+
+  async function loadPatientTags(patientId: number): Promise<PatientTag[]> {
+    if (patientTags.value[patientId]) return patientTags.value[patientId]
+    try {
+      const tags = await getPatientTags(patientId)
+      patientTags.value[patientId] = tags
+      return tags
+    } catch {
+      return []
+    }
+  }
+
+  async function updatePatientTags(patientId: number, tags: PatientTag[]): Promise<boolean> {
+    if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
+      error.value = 'Organization not set'
+      return false
+    }
+    try {
+      await setPatientTags(patientId, tags, authStore.context!.organizationId)
+      patientTags.value[patientId] = tags
+      return true
+    } catch (e: any) {
+      error.value = e.message || 'Failed to update tags'
+      return false
+    }
+  }
+
   return {
     // State
     currentPatient,
@@ -364,6 +397,7 @@ export const useRegistrationStore = defineStore('registration', () => {
     isLoadingRegistrations,
     isRegistering,
     error,
+    patientTags,
 
     // Getters
     waitingList,
@@ -387,5 +421,7 @@ export const useRegistrationStore = defineStore('registration', () => {
     completeConsult,
     cancel,
     callNext,
+    loadPatientTags,
+    updatePatientTags,
   }
 })

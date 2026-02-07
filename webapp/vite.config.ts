@@ -60,7 +60,7 @@ export default defineConfig(({ mode }) => {
       },
     },
 
-    // @ts-expect-error vitest config
+    // @ts-ignore vitest config
     test: {
       environment: 'happy-dom',
       globals: true,

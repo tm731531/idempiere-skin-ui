@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, computed, ref } from 'vue'
 import { useRegistrationStore } from '@/stores/registration'
+import { TAG_DISPLAY } from '@/api/registration'
 
 const store = useRegistrationStore()
 
@@ -13,12 +14,26 @@ let refreshInterval: number | null = null
 onMounted(async () => {
   await store.loadDoctors()
   await store.loadTodayRegistrations()
+  loadAllTags()
 
   // 每 10 秒自動更新
   refreshInterval = window.setInterval(() => {
     store.loadTodayRegistrations(selectedResourceId.value || undefined)
   }, 10000)
 })
+
+// Load tags for all patients in today's registrations
+function loadAllTags() {
+  const patientIds = new Set(store.todayRegistrations.map(r => r.patientId).filter(id => id > 0))
+  for (const id of patientIds) {
+    store.loadPatientTags(id)
+  }
+}
+
+// Get tags for a specific patient
+function getPatientTags(patientId: number) {
+  return store.patientTags[patientId] || []
+}
 
 // 清理
 import { onUnmounted } from 'vue'
@@ -115,7 +130,10 @@ const availableDoctors = computed(() =>
         >
           <div class="queue-number">{{ reg.queueNumber }}</div>
           <div class="queue-info">
-            <div class="patient-name">{{ reg.patientName }}</div>
+            <div class="patient-name">
+              {{ reg.patientName }}
+              <span v-for="tag in getPatientTags(reg.patientId)" :key="tag" class="tag-badge" :title="TAG_DISPLAY[tag].label">{{ TAG_DISPLAY[tag].icon }}</span>
+            </div>
             <div class="resource-name">{{ reg.resourceName }}</div>
           </div>
           <div class="queue-actions">
@@ -138,7 +156,10 @@ const availableDoctors = computed(() =>
         >
           <div class="queue-number">{{ reg.queueNumber }}</div>
           <div class="queue-info">
-            <div class="patient-name">{{ reg.patientName }}</div>
+            <div class="patient-name">
+              {{ reg.patientName }}
+              <span v-for="tag in getPatientTags(reg.patientId)" :key="tag" class="tag-badge" :title="TAG_DISPLAY[tag].label">{{ TAG_DISPLAY[tag].icon }}</span>
+            </div>
             <div class="resource-name">{{ reg.resourceName }}</div>
           </div>
           <div class="queue-actions">
@@ -177,7 +198,10 @@ const availableDoctors = computed(() =>
         >
           <div class="queue-number">{{ reg.queueNumber }}</div>
           <div class="queue-info">
-            <div class="patient-name">{{ reg.patientName }}</div>
+            <div class="patient-name">
+              {{ reg.patientName }}
+              <span v-for="tag in getPatientTags(reg.patientId)" :key="tag" class="tag-badge" :title="TAG_DISPLAY[tag].label">{{ TAG_DISPLAY[tag].icon }}</span>
+            </div>
             <div class="patient-id">{{ reg.patientTaxId }}</div>
             <div class="resource-name">{{ reg.resourceName }}</div>
           </div>
@@ -389,5 +413,10 @@ const availableDoctors = computed(() =>
   padding: 1rem;
   border-radius: 0.5rem;
   margin-top: 1rem;
+}
+
+.tag-badge {
+  font-size: 0.75rem;
+  margin-left: 0.125rem;
 }
 </style>

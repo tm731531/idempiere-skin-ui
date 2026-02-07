@@ -95,6 +95,11 @@ const router = createRouter({
           name: 'receive',
           component: () => import('@/views/inventory/ReceiveView.vue'),
         },
+        {
+          path: 'count',
+          name: 'count',
+          component: () => import('@/views/inventory/CountView.vue'),
+        },
       ],
     },
     // 404

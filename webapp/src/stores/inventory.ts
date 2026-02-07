@@ -8,12 +8,15 @@ import { useAuthStore } from './auth'
 import {
   type StockItem,
   type Warehouse,
+  type ReceiptLine,
   listStock,
   listWarehouses,
   searchProducts,
   createTransfer,
   listPurchaseOrders,
   getOrderLines,
+  createReceipt,
+  getOrderVendorId,
 } from '@/api/inventory'
 
 export const useInventoryStore = defineStore('inventory', () => {
@@ -32,6 +35,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   const purchaseOrders = ref<any[]>([])
   const orderLines = ref<any[]>([])
   const isLoadingOrders = ref(false)
+  const isReceiving = ref(false)
 
   const error = ref<string | null>(null)
 
@@ -118,13 +122,45 @@ export const useInventoryStore = defineStore('inventory', () => {
     }
   }
 
+  async function executeReceive(orderId: number, lines: ReceiptLine[]): Promise<boolean> {
+    if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
+      error.value = 'Organization not set'
+      return false
+    }
+    if (!authStore.context?.warehouseId && authStore.context?.warehouseId !== 0) {
+      error.value = 'Warehouse not set'
+      return false
+    }
+
+    isReceiving.value = true
+    error.value = null
+    try {
+      const vendorId = await getOrderVendorId(orderId)
+      await createReceipt(
+        orderId,
+        vendorId,
+        lines,
+        authStore.context!.organizationId,
+        authStore.context!.warehouseId,
+      )
+      // Reload order lines to show updated qty
+      await loadOrderLines(orderId)
+      return true
+    } catch (e: any) {
+      error.value = e.message || 'Receipt failed'
+      return false
+    } finally {
+      isReceiving.value = false
+    }
+  }
+
   return {
     stockItems, warehouses, isLoadingStock,
     transferProducts, isTransferring,
-    purchaseOrders, orderLines, isLoadingOrders,
+    purchaseOrders, orderLines, isLoadingOrders, isReceiving,
     error,
     loadStock, loadWarehouses,
     searchForTransfer, executeTransfer,
-    loadPurchaseOrders, loadOrderLines,
+    loadPurchaseOrders, loadOrderLines, executeReceive,
   }
 })

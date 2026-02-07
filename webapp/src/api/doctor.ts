@@ -176,6 +176,124 @@ export async function loadPrescription(assignmentId: number): Promise<Prescripti
 }
 
 /**
+ * Load all prescriptions (history view)
+ */
+export async function listPrescriptionHistory(): Promise<Prescription[]> {
+  try {
+    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
+      params: {
+        '$filter': `contains(Name,'${PRESCRIPTION_PREFIX}')`,
+        '$orderby': 'Updated desc',
+        '$top': 50,
+      },
+    })
+
+    const prescriptions: Prescription[] = []
+    for (const r of response.data.records || []) {
+      try {
+        const data = JSON.parse(r.Value)
+        const idMatch = r.Name.match(/(\d+)$/)
+        if (idMatch) {
+          prescriptions.push({
+            ...data,
+            assignmentId: parseInt(idMatch[1], 10),
+          })
+        }
+      } catch { /* skip invalid */ }
+    }
+    return prescriptions
+  } catch {
+    return []
+  }
+}
+
+// ========== Template API (stored in AD_SysConfig) ==========
+
+const TEMPLATE_PREFIX = 'CLINIC_TEMPLATE_'
+
+export interface PrescriptionTemplate {
+  id: string           // configName
+  name: string
+  lines: PrescriptionLine[]
+  totalDays: number
+}
+
+/**
+ * List all templates for the current user
+ */
+export async function listTemplates(): Promise<PrescriptionTemplate[]> {
+  try {
+    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
+      params: {
+        '$filter': `contains(Name,'${TEMPLATE_PREFIX}')`,
+        '$orderby': 'Name asc',
+      },
+    })
+
+    const templates: PrescriptionTemplate[] = []
+    for (const r of response.data.records || []) {
+      try {
+        const data = JSON.parse(r.Value)
+        templates.push({
+          id: r.Name,
+          name: data.name || r.Name.replace(TEMPLATE_PREFIX, ''),
+          lines: data.lines || [],
+          totalDays: data.totalDays || 7,
+        })
+      } catch { /* skip invalid */ }
+    }
+    return templates
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Save a prescription template
+ */
+export async function saveTemplate(
+  templateName: string,
+  lines: PrescriptionLine[],
+  totalDays: number,
+  orgId: number
+): Promise<void> {
+  const safeName = escapeODataString(templateName)
+  const configName = `${TEMPLATE_PREFIX}${safeName}`
+  const value = JSON.stringify({ name: templateName, lines, totalDays })
+
+  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
+    params: { '$filter': `Name eq '${configName}'` },
+  })
+
+  const records = response.data.records || []
+  if (records.length > 0) {
+    await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, { 'Value': value })
+  } else {
+    await apiClient.post('/api/v1/models/AD_SysConfig', {
+      'AD_Org_ID': orgId,
+      'Name': configName,
+      'Value': value,
+      'Description': `Prescription template: ${templateName}`,
+      'ConfigurationLevel': 'S',
+    })
+  }
+}
+
+/**
+ * Delete a prescription template
+ */
+export async function deleteTemplate(configName: string): Promise<void> {
+  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
+    params: { '$filter': `Name eq '${configName}'` },
+  })
+
+  const records = response.data.records || []
+  if (records.length > 0) {
+    await apiClient.delete(`/api/v1/models/AD_SysConfig/${records[0].id}`)
+  }
+}
+
+/**
  * Load all completed prescriptions (for pharmacy queue)
  */
 export async function listCompletedPrescriptions(): Promise<Prescription[]> {
