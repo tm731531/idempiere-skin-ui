@@ -8,7 +8,8 @@
  */
 
 import { apiClient } from './client'
-import { type Prescription, listCompletedPrescriptions } from './doctor'
+import { type Prescription, type PrescriptionLine, listCompletedPrescriptions } from './doctor'
+import { lookupDocTypeId, lookupEachUomId } from './lookup'
 import { getSysConfigValue, upsertSysConfig } from './sysconfig'
 
 // ========== Types ==========
@@ -64,6 +65,76 @@ export async function listPendingDispense(): Promise<DispenseItem[]> {
   }
 
   return items
+}
+
+// ========== Dispense Movement API (stock deduction) ==========
+
+export interface DispenseMovementResult {
+  movementId: number
+  completed: boolean
+  error?: string
+}
+
+/**
+ * Create a stock deduction movement (M_Movement) for dispensed prescription items.
+ *
+ * Moves products from the pharmacy locator to a "dispensed" locator (same locator,
+ * consuming stock) via internal use movement. This creates the accounting trail
+ * in iDempiere so stock reports reflect dispensed quantities.
+ *
+ * @param lines - Prescription lines with productId and totalQuantity
+ * @param fromLocatorId - Pharmacy locator where stock is held
+ * @param toLocatorId - Destination locator (can be same as from for internal use)
+ * @param orgId - Organization ID
+ * @param description - Movement description (e.g. "Dispense for assignment 123")
+ */
+export async function createDispenseMovement(
+  lines: Pick<PrescriptionLine, 'productId' | 'productName' | 'totalQuantity'>[],
+  fromLocatorId: number,
+  toLocatorId: number,
+  orgId: number,
+  description?: string,
+): Promise<DispenseMovementResult> {
+  if (lines.length === 0) return { movementId: 0, completed: false, error: 'No lines to dispense' }
+
+  const docTypeId = await lookupDocTypeId('MMM')
+  const uomId = await lookupEachUomId()
+
+  // Create M_Movement header
+  const headerRes = await apiClient.post('/api/v1/models/M_Movement', {
+    'AD_Org_ID': orgId,
+    'C_DocType_ID': docTypeId,
+    'MovementDate': new Date().toISOString().slice(0, 10),
+    'Description': description || 'Clinic dispense',
+  })
+
+  const movementId = headerRes.data.id
+
+  // Create M_MovementLine per prescription line
+  for (const line of lines) {
+    if (line.totalQuantity <= 0) continue
+    await apiClient.post('/api/v1/models/M_MovementLine', {
+      'AD_Org_ID': orgId,
+      'M_Movement_ID': movementId,
+      'M_Product_ID': line.productId,
+      'M_Locator_ID': fromLocatorId,
+      'M_LocatorTo_ID': toLocatorId,
+      'C_UOM_ID': uomId,
+      'MovementQty': line.totalQuantity,
+      'QtyEntered': line.totalQuantity,
+      'TargetQty': 0,
+    })
+  }
+
+  // Complete the movement
+  try {
+    await apiClient.put(`/api/v1/models/M_Movement/${movementId}`, {
+      'doc-action': 'CO',
+    })
+    return { movementId, completed: true }
+  } catch (e: any) {
+    return { movementId, completed: false, error: e.response?.data?.detail || e.message || '配藥扣庫存失敗' }
+  }
 }
 
 // ========== Stock API ==========

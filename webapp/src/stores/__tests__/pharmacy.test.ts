@@ -10,10 +10,14 @@ vi.mock('@/api/pharmacy', () => ({
   listPendingDispense: vi.fn(),
   setDispenseStatus: vi.fn(),
   getProductStock: vi.fn(),
+  createDispenseMovement: vi.fn().mockResolvedValue({ movementId: 1, completed: true }),
 }))
 
 vi.mock('@/api/client', () => ({
-  apiClient: { defaults: { headers: { common: {} } } },
+  apiClient: {
+    defaults: { headers: { common: {} } },
+    get: vi.fn().mockResolvedValue({ data: { records: [{ id: 50 }] } }),
+  },
 }))
 
 vi.mock('@/config', () => ({

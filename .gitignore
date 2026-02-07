@@ -27,3 +27,6 @@ Thumbs.db
 # Temp files
 *.tmp
 *.swp
+
+# Integration test state
+.itest-state.json

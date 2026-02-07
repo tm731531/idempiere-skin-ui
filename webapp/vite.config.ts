@@ -65,6 +65,7 @@ export default defineConfig(({ mode }) => {
       environment: 'happy-dom',
       globals: true,
       include: ['src/**/*.{test,spec}.{js,ts}'],
+      exclude: ['src/__integration__/**', 'node_modules/**'],
     },
   }
 })

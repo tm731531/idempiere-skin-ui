@@ -154,7 +154,7 @@ export async function listPrescriptionHistory(): Promise<Prescription[]> {
         if (idMatch) {
           prescriptions.push({
             ...data,
-            assignmentId: parseInt(idMatch[1], 10),
+            assignmentId: parseInt(idMatch[1]!, 10),
           })
         }
       } catch { /* skip invalid */ }
@@ -239,7 +239,7 @@ export async function listCompletedPrescriptions(): Promise<Prescription[]> {
           if (idMatch) {
             prescriptions.push({
               ...data,
-              assignmentId: parseInt(idMatch[1], 10),
+              assignmentId: parseInt(idMatch[1]!, 10),
             })
           }
         }

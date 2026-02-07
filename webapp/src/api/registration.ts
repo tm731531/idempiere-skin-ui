@@ -353,7 +353,7 @@ async function getRegistrationStatuses(ids: number[]): Promise<Record<number, Re
   for (const [name, value] of Object.entries(valueMap)) {
     const idMatch = name.match(/(\d+)$/)
     if (idMatch) {
-      result[parseInt(idMatch[1], 10)] = value as RegistrationStatus
+      result[parseInt(idMatch[1]!, 10)] = value as RegistrationStatus
     }
   }
   return result

@@ -13,6 +13,7 @@ import {
   listPendingDispense,
   setDispenseStatus,
   getProductStock,
+  createDispenseMovement,
 } from '@/api/pharmacy'
 
 export const usePharmacyStore = defineStore('pharmacy', () => {
@@ -68,8 +69,57 @@ export const usePharmacyStore = defineStore('pharmacy', () => {
   async function completeDispensing(assignmentId: number): Promise<void> {
     if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) return
 
+    const orgId = authStore.context!.organizationId
+    const warehouseId = authStore.context!.warehouseId
+
     try {
-      await setDispenseStatus(assignmentId, 'DISPENSED', authStore.context!.organizationId)
+      await setDispenseStatus(assignmentId, 'DISPENSED', orgId)
+
+      // Create stock deduction movement if we have prescription lines
+      const item = dispenseQueue.value.find(i => i.assignmentId === assignmentId)
+      if (item && item.prescription?.lines && item.prescription.lines.length > 0 && warehouseId) {
+        const { apiClient } = await import('@/api/client')
+        // Look up default locator for current warehouse (source)
+        const fromLocRes = await apiClient.get('/api/v1/models/M_Locator', {
+          params: {
+            '$filter': `M_Warehouse_ID eq ${warehouseId} and IsDefault eq true and IsActive eq true`,
+            '$top': 1,
+          },
+        })
+        const fromLocatorId = fromLocRes.data.records?.[0]?.id
+
+        // Look up Counter warehouse locator (dispensing destination)
+        const counterWhRes = await apiClient.get('/api/v1/models/M_Warehouse', {
+          params: {
+            '$filter': "Name eq 'Counter' and IsActive eq true",
+            '$top': 1,
+          },
+        })
+        let toLocatorId = 0
+        const counterWhId = counterWhRes.data.records?.[0]?.id
+        if (counterWhId) {
+          const toLocRes = await apiClient.get('/api/v1/models/M_Locator', {
+            params: {
+              '$filter': `M_Warehouse_ID eq ${counterWhId} and IsActive eq true`,
+              '$top': 1,
+            },
+          })
+          toLocatorId = toLocRes.data.records?.[0]?.id || 0
+        }
+
+        if (fromLocatorId && toLocatorId && fromLocatorId !== toLocatorId) {
+          const result = await createDispenseMovement(
+            item!.prescription.lines,
+            fromLocatorId,
+            toLocatorId,
+            orgId,
+            `Clinic dispense for assignment ${assignmentId}`,
+          )
+          if (!result.completed && result.error) {
+            error.value = `配藥完成但扣庫存失敗: ${result.error}`
+          }
+        }
+      }
 
       // Remove from queue
       dispenseQueue.value = dispenseQueue.value.filter(i => i.assignmentId !== assignmentId)
