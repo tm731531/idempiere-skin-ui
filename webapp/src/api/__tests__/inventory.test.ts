@@ -253,3 +253,109 @@ describe('getOrderLines', () => {
     })
   })
 })
+
+describe('createReceipt', () => {
+  it('creates M_InOut header, lines, and attempts completion', async () => {
+    mockPost
+      .mockResolvedValueOnce({ data: { id: 600 } }) // header
+      .mockResolvedValueOnce({ data: { id: 601 } }) // line 1
+      .mockResolvedValueOnce({ data: { id: 602 } }) // line 2
+    mockPut.mockResolvedValue({ data: {} })
+
+    const lines = [
+      { orderLineId: 400, productId: 100, productName: 'Aspirin', qtyOrdered: 100, qtyDelivered: 50, qtyReceived: 50 },
+      { orderLineId: 401, productId: 101, productName: 'Ibuprofen', qtyOrdered: 200, qtyDelivered: 100, qtyReceived: 100 },
+    ]
+
+    const result = await createReceipt(300, 1000, lines, 11, 2000)
+
+    expect(result).toBe(600)
+
+    // Header created
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_InOut', expect.objectContaining({
+      'AD_Org_ID': 11,
+      'C_Order_ID': 300,
+      'C_BPartner_ID': 1000,
+      'M_Warehouse_ID': 2000,
+      'IsSOTrx': false,
+      'MovementType': 'V+',
+    }))
+
+    // Lines created (only qtyReceived > 0)
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_InOutLine', expect.objectContaining({
+      'M_InOut_ID': 600,
+      'C_OrderLine_ID': 400,
+      'M_Product_ID': 100,
+      'M_Locator_ID': 0,
+      'MovementQty': 50,
+    }))
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_InOutLine', expect.objectContaining({
+      'M_InOut_ID': 600,
+      'C_OrderLine_ID': 401,
+      'M_Product_ID': 101,
+      'M_Locator_ID': 0,
+      'MovementQty': 100,
+    }))
+
+    // Completion attempted
+    expect(mockPut).toHaveBeenCalledWith('/api/v1/models/M_InOut/600', {
+      'DocAction': 'CO',
+      'DocStatus': 'CO',
+    })
+  })
+
+  it('skips lines with qtyReceived <= 0', async () => {
+    mockPost.mockResolvedValueOnce({ data: { id: 600 } })
+    mockPut.mockResolvedValue({ data: {} })
+
+    const lines = [
+      { orderLineId: 400, productId: 100, productName: 'Aspirin', qtyOrdered: 100, qtyDelivered: 50, qtyReceived: 0 },
+      { orderLineId: 401, productId: 101, productName: 'Ibuprofen', qtyOrdered: 200, qtyDelivered: 100, qtyReceived: -5 },
+    ]
+
+    const result = await createReceipt(300, 1000, lines, 11, 2000)
+
+    expect(result).toBe(600)
+    // Header created, but no lines
+    expect(mockPost).toHaveBeenCalledTimes(1) // only header
+  })
+
+  it('still returns inOutId if completion fails', async () => {
+    mockPost
+      .mockResolvedValueOnce({ data: { id: 600 } })
+      .mockResolvedValueOnce({ data: { id: 601 } })
+    mockPut.mockRejectedValue(new Error('DocAction not supported'))
+
+    const lines = [
+      { orderLineId: 400, productId: 100, productName: 'Aspirin', qtyOrdered: 100, qtyDelivered: 50, qtyReceived: 50 },
+    ]
+
+    const result = await createReceipt(300, 1000, lines, 11, 2000)
+
+    expect(result).toBe(600)
+  })
+})
+
+describe('getOrderVendorId', () => {
+  it('returns vendor ID from expanded object', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        C_BPartner_ID: { id: 1000, identifier: 'Vendor A' },
+      },
+    })
+
+    const result = await getOrderVendorId(300)
+    expect(result).toBe(1000)
+  })
+
+  it('returns vendor ID from scalar', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        C_BPartner_ID: 1000,
+      },
+    })
+
+    const result = await getOrderVendorId(300)
+    expect(result).toBe(1000)
+  })
+})

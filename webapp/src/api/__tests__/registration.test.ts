@@ -249,7 +249,7 @@ describe('getPatientTags', () => {
     mockGet.mockResolvedValue({
       data: {
         records: [
-          { Value: JSON.stringify({ tags: ['VIP', 'Allergy'] }) },
+          { Value: JSON.stringify(['VIP', 'Allergy']) },
         ],
       },
     })
@@ -281,7 +281,7 @@ describe('setPatientTags', () => {
     await setPatientTags(123, ['VIP', 'Chronic'], 11)
 
     expect(mockPut).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig/555', {
-      'Value': JSON.stringify({ tags: ['VIP', 'Chronic'] }),
+      'Value': JSON.stringify(['VIP', 'Chronic']),
     })
     expect(mockPost).not.toHaveBeenCalled()
   })
@@ -295,7 +295,7 @@ describe('setPatientTags', () => {
     expect(mockPost).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig', {
       'AD_Org_ID': 11,
       'Name': 'CLINIC_PATIENT_TAGS_123',
-      'Value': JSON.stringify({ tags: ['Allergy'] }),
+      'Value': JSON.stringify(['Allergy']),
       'Description': 'Patient tags',
       'ConfigurationLevel': 'S',
     })

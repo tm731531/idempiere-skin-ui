@@ -15,6 +15,10 @@ vi.mock('@/api/doctor', () => ({
     const mult: Record<string, number> = { QD: 1, BID: 2, TID: 3, QID: 4, PRN: 1 }
     return dosage * (mult[freq] || 1) * days
   }),
+  listPrescriptionHistory: vi.fn(),
+  listTemplates: vi.fn(),
+  saveTemplate: vi.fn(),
+  deleteTemplate: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({
@@ -241,6 +245,91 @@ describe('Doctor Store', () => {
       expect(store.diagnosis).toBe('')
       expect(store.prescriptionLines).toEqual([])
       expect(store.totalDays).toBe(7)
+    })
+  })
+
+  describe('loadHistory', () => {
+    it('loads prescription history', async () => {
+      const history = [
+        {
+          diagnosis: 'Cold',
+          lines: [{ productId: 1, productName: 'Aspirin', dosage: 3, unit: 'g', frequency: 'TID', days: 7, totalQuantity: 63 }],
+          status: 'COMPLETED',
+          createdAt: '2025-01-01',
+        },
+      ]
+      vi.mocked(doctorApi.listPrescriptionHistory).mockResolvedValue(history as any)
+
+      const store = useDoctorStore()
+      await store.loadHistory()
+
+      expect(store.prescriptionHistory).toEqual(history)
+    })
+
+    it('sets error on failure', async () => {
+      vi.mocked(doctorApi.listPrescriptionHistory).mockRejectedValue(new Error('Network'))
+
+      const store = useDoctorStore()
+      await store.loadHistory()
+
+      expect(store.error).toBe('Network')
+      expect(store.prescriptionHistory).toEqual([])
+    })
+  })
+
+  describe('loadTemplateList', () => {
+    it('loads templates', async () => {
+      const templates = [
+        {
+          name: 'Cold combo',
+          lines: [{ productId: 1, productName: 'Aspirin', dosage: 3, unit: 'g', frequency: 'TID', days: 7, totalQuantity: 63 }],
+        },
+      ]
+      vi.mocked(doctorApi.listTemplates).mockResolvedValue(templates as any)
+
+      const store = useDoctorStore()
+      await store.loadTemplateList()
+
+      expect(store.templates).toEqual(templates)
+    })
+  })
+
+  describe('saveCurrentAsTemplate', () => {
+    it('saves template from current prescription lines', async () => {
+      vi.mocked(doctorApi.saveTemplate).mockResolvedValue()
+      vi.mocked(doctorApi.listTemplates).mockResolvedValue([])
+
+      const store = useDoctorStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 1 }
+
+      store.addMedicine({ id: 1, value: '', name: 'Aspirin', isActive: true }, 3, 'TID', 7)
+
+      await store.saveCurrentAsTemplate('cold')
+
+      expect(doctorApi.saveTemplate).toHaveBeenCalledWith('cold',
+        [expect.objectContaining({ productId: 1, productName: 'Aspirin' })],
+        7,
+        11
+      )
+      expect(doctorApi.listTemplates).toHaveBeenCalled() // reloaded
+    })
+  })
+
+  describe('removeTemplate', () => {
+    it('deletes template and reloads', async () => {
+      vi.mocked(doctorApi.deleteTemplate).mockResolvedValue()
+
+      const store = useDoctorStore()
+      store.templates = [
+        { id: 'CLINIC_TEMPLATE_cold', name: 'Cold combo', lines: [], totalDays: 7 },
+      ]
+
+      await store.removeTemplate('CLINIC_TEMPLATE_cold')
+
+      expect(doctorApi.deleteTemplate).toHaveBeenCalledWith('CLINIC_TEMPLATE_cold')
+      expect(store.templates).toEqual([]) // filtered out
     })
   })
 })

@@ -13,6 +13,8 @@ vi.mock('@/api/inventory', () => ({
   createTransfer: vi.fn(),
   listPurchaseOrders: vi.fn(),
   getOrderLines: vi.fn(),
+  createReceipt: vi.fn(),
+  getOrderVendorId: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({
@@ -191,6 +193,69 @@ describe('Inventory Store', () => {
 
       expect(store.orderLines).toEqual(lines)
       expect(inventoryApi.getOrderLines).toHaveBeenCalledWith(300)
+    })
+  })
+
+  describe('executeReceive', () => {
+    it('creates receipt and reloads order lines', async () => {
+      vi.mocked(inventoryApi.getOrderVendorId).mockResolvedValue(1000)
+      vi.mocked(inventoryApi.createReceipt).mockResolvedValue(600)
+      vi.mocked(inventoryApi.getOrderLines).mockResolvedValue([])
+
+      const store = useInventoryStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 2000 }
+
+      // Set up order lines with qtyReceived
+      const lines = [
+        { orderLineId: 400, productId: 100, productName: 'Aspirin', qtyOrdered: 100, qtyDelivered: 50, qtyReceived: 50 },
+      ]
+      store.selectedOrderId = 300
+
+      const result = await store.executeReceive(300, lines)
+
+      expect(result).toBe(true)
+      expect(inventoryApi.getOrderVendorId).toHaveBeenCalledWith(300)
+      expect(inventoryApi.createReceipt).toHaveBeenCalledWith(300, 1000, lines, 11, 2000)
+      expect(inventoryApi.getOrderLines).toHaveBeenCalledWith(300) // reloaded
+      expect(store.isReceiving).toBe(false)
+    })
+
+    it('returns false without org context', async () => {
+      const store = useInventoryStore()
+      const result = await store.executeReceive(300, [])
+      expect(result).toBe(false)
+      expect(store.error).toBe('Organization not set')
+    })
+
+    it('returns false without warehouse context', async () => {
+      const store = useInventoryStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: null }
+
+      const result = await store.executeReceive(300, [])
+      expect(result).toBe(false)
+      expect(store.error).toBe('Warehouse not set')
+    })
+
+    it('handles warehouseId=0 correctly', async () => {
+      vi.mocked(inventoryApi.getOrderVendorId).mockResolvedValue(1000)
+      vi.mocked(inventoryApi.createReceipt).mockResolvedValue(600)
+      vi.mocked(inventoryApi.getOrderLines).mockResolvedValue([])
+
+      const store = useInventoryStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, roleId: 1, organizationId: 11, warehouseId: 0 }
+
+      const lines = [
+        { orderLineId: 400, productId: 100, productName: 'Aspirin', qtyOrdered: 100, qtyDelivered: 50, qtyReceived: 50 },
+      ]
+
+      const result = await store.executeReceive(300, lines)
+      expect(result).toBe(true) // warehouseId=0 is valid
     })
   })
 })

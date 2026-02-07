@@ -2,7 +2,7 @@
  * Doctor API Unit Tests
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { calculateTotalQuantity, searchMedicines, listMedicines, savePrescription, loadPrescription, listCompletedPrescriptions } from '../doctor'
+import { calculateTotalQuantity, searchMedicines, listMedicines, savePrescription, loadPrescription, listCompletedPrescriptions, listPrescriptionHistory, listTemplates, saveTemplate, deleteTemplate } from '../doctor'
 import { apiClient } from '../client'
 
 vi.mock('../client', () => ({
@@ -225,5 +225,146 @@ describe('listCompletedPrescriptions', () => {
     mockGet.mockRejectedValue(new Error('Network error'))
     const result = await listCompletedPrescriptions()
     expect(result).toEqual([])
+  })
+})
+
+describe('listPrescriptionHistory', () => {
+  it('parses prescriptions from AD_SysConfig records', async () => {
+    const prescription = {
+      diagnosis: 'Cold',
+      lines: [{ productId: 1, productName: 'Aspirin', dosage: 3, unit: 'g', frequency: 'TID', days: 7, totalQuantity: 63 }],
+      status: 'COMPLETED',
+      createdAt: '2025-01-01',
+    }
+
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          { Name: 'CLINIC_PRESCRIPTION_100', Value: JSON.stringify(prescription) },
+        ],
+      },
+    })
+
+    const result = await listPrescriptionHistory(123)
+    expect(result).toHaveLength(1)
+    expect(result[0].diagnosis).toBe('Cold')
+    expect(result[0].lines).toHaveLength(1)
+  })
+
+  it('skips invalid JSON', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          { Name: 'CLINIC_PRESCRIPTION_100', Value: 'invalid-json' },
+          { Name: 'CLINIC_PRESCRIPTION_101', Value: JSON.stringify({ diagnosis: 'Flu', lines: [], status: 'COMPLETED' }) },
+        ],
+      },
+    })
+
+    const result = await listPrescriptionHistory(123)
+    expect(result).toHaveLength(1)
+    expect(result[0].diagnosis).toBe('Flu')
+  })
+
+  it('returns empty array on API error', async () => {
+    mockGet.mockRejectedValue(new Error('Network error'))
+    const result = await listPrescriptionHistory(123)
+    expect(result).toEqual([])
+  })
+})
+
+describe('listTemplates', () => {
+  it('parses templates from AD_SysConfig', async () => {
+    const template = {
+      name: 'Cold combo',
+      lines: [{ productId: 1, productName: 'Aspirin', dosage: 3, unit: 'g', frequency: 'TID', days: 7, totalQuantity: 63 }],
+    }
+
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          { Name: 'CLINIC_TEMPLATE_cold', Value: JSON.stringify(template) },
+        ],
+      },
+    })
+
+    const result = await listTemplates()
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe('Cold combo')
+    expect(result[0].lines).toHaveLength(1)
+  })
+
+  it('returns empty array on error', async () => {
+    mockGet.mockRejectedValue(new Error('Network error'))
+    const result = await listTemplates()
+    expect(result).toEqual([])
+  })
+})
+
+describe('saveTemplate', () => {
+  const lines = [{ productId: 1, productName: 'Aspirin', dosage: 3, unit: 'g', frequency: 'TID', days: 7, totalQuantity: 63 }]
+
+  it('updates existing when record found', async () => {
+    mockGet.mockResolvedValue({
+      data: { records: [{ id: 777 }] },
+    })
+    mockPut.mockResolvedValue({ data: {} })
+
+    await saveTemplate('cold', lines, 7, 11)
+
+    expect(mockPut).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig/777', {
+      'Value': JSON.stringify({ name: 'cold', lines, totalDays: 7 }),
+    })
+    expect(mockPost).not.toHaveBeenCalled()
+  })
+
+  it('creates new when not found', async () => {
+    mockGet.mockResolvedValue({ data: { records: [] } })
+    mockPost.mockResolvedValue({ data: {} })
+
+    await saveTemplate('cold', lines, 7, 11)
+
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig', {
+      'AD_Org_ID': 11,
+      'Name': 'CLINIC_TEMPLATE_cold',
+      'Value': JSON.stringify({ name: 'cold', lines, totalDays: 7 }),
+      'Description': 'Prescription template: cold',
+      'ConfigurationLevel': 'S',
+    })
+    expect(mockPut).not.toHaveBeenCalled()
+  })
+})
+
+describe('deleteTemplate', () => {
+  const mockDelete = vi.fn()
+
+  beforeEach(() => {
+    // Add delete to apiClient mock
+    ;(apiClient as any).delete = mockDelete
+    mockDelete.mockClear()
+  })
+
+  it('finds and deletes record', async () => {
+    mockGet.mockResolvedValue({
+      data: { records: [{ id: 777 }] },
+    })
+    mockDelete.mockResolvedValue({ data: {} })
+
+    await deleteTemplate('CLINIC_TEMPLATE_cold')
+
+    expect(mockGet).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig', {
+      params: expect.objectContaining({
+        '$filter': "Name eq 'CLINIC_TEMPLATE_cold'",
+      }),
+    })
+    expect(mockDelete).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig/777')
+  })
+
+  it('does nothing when not found', async () => {
+    mockGet.mockResolvedValue({ data: { records: [] } })
+
+    await deleteTemplate('CLINIC_TEMPLATE_nonexistent')
+
+    expect(mockDelete).not.toHaveBeenCalled()
   })
 })
