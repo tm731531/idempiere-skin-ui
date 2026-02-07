@@ -9,6 +9,7 @@
 
 import { apiClient } from './client'
 import { type Prescription, listCompletedPrescriptions } from './doctor'
+import { getSysConfigValue, upsertSysConfig } from './sysconfig'
 
 // ========== Types ==========
 
@@ -32,13 +33,9 @@ export interface StockInfo {
 const DISPENSE_PREFIX = 'CLINIC_DISPENSE_STATUS_'
 
 export async function getDispenseStatus(assignmentId: number): Promise<DispenseStatus> {
-  const configName = `${DISPENSE_PREFIX}${assignmentId}`
   try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: { '$filter': `Name eq '${configName}'` },
-    })
-    const records = response.data.records || []
-    return records.length > 0 ? (records[0].Value as DispenseStatus) : 'PENDING'
+    const value = await getSysConfigValue(`${DISPENSE_PREFIX}${assignmentId}`)
+    return (value as DispenseStatus) || 'PENDING'
   } catch {
     return 'PENDING'
   }
@@ -49,24 +46,7 @@ export async function setDispenseStatus(
   status: DispenseStatus,
   orgId: number
 ): Promise<void> {
-  const configName = `${DISPENSE_PREFIX}${assignmentId}`
-
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: { '$filter': `Name eq '${configName}'` },
-  })
-
-  const records = response.data.records || []
-  if (records.length > 0) {
-    await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, { 'Value': status })
-  } else {
-    await apiClient.post('/api/v1/models/AD_SysConfig', {
-      'AD_Org_ID': orgId,
-      'Name': configName,
-      'Value': status,
-      'Description': 'Clinic dispense status',
-      'ConfigurationLevel': 'S',
-    })
-  }
+  await upsertSysConfig(`${DISPENSE_PREFIX}${assignmentId}`, status, orgId, 'Clinic dispense status')
 }
 
 /**

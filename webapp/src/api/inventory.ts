@@ -10,14 +10,7 @@
 
 import { apiClient } from './client'
 import { lookupDocTypeId, lookupEachUomId } from './lookup'
-
-function escapeODataString(value: string): string {
-  if (!value) return ''
-  return value
-    .replace(/'/g, "''")
-    .replace(/[<>{}|\\^~\[\]`]/g, '')
-    .trim()
-}
+import { escapeODataString } from './utils'
 
 // ========== Types ==========
 
@@ -284,9 +277,7 @@ export async function createTransfer(input: TransferInput): Promise<number> {
     await apiClient.put(`/api/v1/models/M_Movement/${movementId}`, {
       'doc-action': 'CO',
     })
-  } catch (e: any) {
-    console.error('Movement completion failed:', e.message)
-  }
+  } catch { /* completion failed — movement still created */ }
 
   return movementId
 }
@@ -335,7 +326,6 @@ export async function createBatchTransfer(input: {
     })
     return { movementId, completed: true }
   } catch (e: any) {
-    console.error('Batch movement completion failed:', e.message)
     return { movementId, completed: false, error: e.response?.data?.detail || e.message || '調撥完成失敗' }
   }
 }
@@ -459,9 +449,7 @@ export async function createReceipt(
     await apiClient.put(`/api/v1/models/M_InOut/${inOutId}`, {
       'doc-action': 'CO',
     })
-  } catch (e: any) {
-    console.error('Receipt completion failed:', e.message)
-  }
+  } catch { /* completion failed — receipt still created */ }
 
   return inOutId
 }

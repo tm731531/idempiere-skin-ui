@@ -17,14 +17,7 @@ import {
   lookupDefaultTaxId,
   lookupCurrentUserId,
 } from './lookup'
-
-function escapeODataString(value: string): string {
-  if (!value) return ''
-  return value
-    .replace(/'/g, "''")
-    .replace(/[<>{}|\\^~\[\]`]/g, '')
-    .trim()
-}
+import { escapeODataString } from './utils'
 
 // ========== Types ==========
 
@@ -187,10 +180,7 @@ export async function createPurchaseOrder(input: PurchaseOrderInput): Promise<{ 
     await apiClient.put(`/api/v1/models/C_Order/${orderId}`, {
       'doc-action': 'CO',
     })
-  } catch (e: any) {
-    console.error('PO completion failed:', e.message)
-    // Order was created but not completed — return it anyway
-  }
+  } catch { /* completion failed — order still created */ }
 
   return { id: orderId, documentNo }
 }

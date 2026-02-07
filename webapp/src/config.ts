@@ -17,8 +17,7 @@ export async function loadConfig(): Promise<AppConfig> {
   try {
     const response = await fetch('/ui/config.json')
     config = await response.json()
-  } catch (e) {
-    console.warn('Failed to load config.json, using defaults')
+  } catch {
     config = { apiBaseUrl: '' }
   }
 

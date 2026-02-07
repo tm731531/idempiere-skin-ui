@@ -10,20 +10,8 @@
 
 import { apiClient } from './client'
 import { lookupCustomerGroupId } from './lookup'
-
-// ========== Security Utils ==========
-
-/**
- * Escape OData string to prevent injection
- */
-function escapeODataString(value: string): string {
-  if (!value) return ''
-  // Escape single quotes and remove dangerous characters
-  return value
-    .replace(/'/g, "''")
-    .replace(/[<>{}|\\^~\[\]`]/g, '')
-    .trim()
-}
+import { upsertSysConfig, getSysConfigValue, batchGetSysConfig } from './sysconfig'
+import { escapeODataString } from './utils'
 
 // ========== Types ==========
 
@@ -358,29 +346,17 @@ const STATUS_PREFIX = 'CLINIC_QUEUE_STATUS_'
 async function getRegistrationStatuses(ids: number[]): Promise<Record<number, RegistrationStatus>> {
   if (ids.length === 0) return {}
 
-  // 建立 Name 清單查詢
-  const names = ids.map(id => `'${STATUS_PREFIX}${id}'`).join(',')
+  const names = ids.map(id => `${STATUS_PREFIX}${id}`)
+  const valueMap = await batchGetSysConfig(names)
 
-  try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: {
-        '$filter': `Name in (${names})`,
-      },
-    })
-
-    const result: Record<number, RegistrationStatus> = {}
-    for (const r of response.data.records || []) {
-      const idMatch = r.Name.match(/(\d+)$/)
-      if (idMatch) {
-        const id = parseInt(idMatch[1], 10)
-        result[id] = r.Value as RegistrationStatus
-      }
+  const result: Record<number, RegistrationStatus> = {}
+  for (const [name, value] of Object.entries(valueMap)) {
+    const idMatch = name.match(/(\d+)$/)
+    if (idMatch) {
+      result[parseInt(idMatch[1], 10)] = value as RegistrationStatus
     }
-    return result
-  } catch {
-    // 如果查詢失敗，回傳空物件（全部當作 WAITING）
-    return {}
   }
+  return result
 }
 
 /**
@@ -391,52 +367,15 @@ export async function setRegistrationStatus(
   status: RegistrationStatus,
   orgId: number
 ): Promise<void> {
-  const configName = `${STATUS_PREFIX}${registrationId}`
-
-  // 先查詢是否已存在
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: {
-      '$filter': `Name eq '${configName}'`,
-    },
-  })
-
-  const records = response.data.records || []
-
-  if (records.length > 0) {
-    // 更新
-    await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, {
-      'Value': status,
-    })
-  } else {
-    // 新增
-    await apiClient.post('/api/v1/models/AD_SysConfig', {
-      'AD_Org_ID': orgId,
-      'Name': configName,
-      'Value': status,
-      'Description': 'Clinic queue status',
-      'ConfigurationLevel': 'S',
-    })
-  }
+  await upsertSysConfig(`${STATUS_PREFIX}${registrationId}`, status, orgId, 'Clinic queue status')
 }
 
 /**
  * 取得掛號狀態
  */
 export async function getRegistrationStatus(registrationId: number): Promise<RegistrationStatus> {
-  const configName = `${STATUS_PREFIX}${registrationId}`
-
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: {
-      '$filter': `Name eq '${configName}'`,
-    },
-  })
-
-  const records = response.data.records || []
-  if (records.length > 0) {
-    return records[0].Value as RegistrationStatus
-  }
-
-  return 'WAITING' // 預設狀態
+  const value = await getSysConfigValue(`${STATUS_PREFIX}${registrationId}`)
+  return (value as RegistrationStatus) || 'WAITING'
 }
 
 /**
@@ -487,14 +426,10 @@ export const TAG_DISPLAY: Record<PatientTag, { icon: string; label: string }> = 
 }
 
 export async function getPatientTags(patientId: number): Promise<PatientTag[]> {
-  const configName = `${TAG_PREFIX}${patientId}`
   try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: { '$filter': `Name eq '${configName}'` },
-    })
-    const records = response.data.records || []
-    if (records.length === 0) return []
-    return JSON.parse(records[0].Value) as PatientTag[]
+    const value = await getSysConfigValue(`${TAG_PREFIX}${patientId}`)
+    if (!value) return []
+    return JSON.parse(value) as PatientTag[]
   } catch {
     return []
   }
@@ -505,23 +440,5 @@ export async function setPatientTags(
   tags: PatientTag[],
   orgId: number
 ): Promise<void> {
-  const configName = `${TAG_PREFIX}${patientId}`
-  const value = JSON.stringify(tags)
-
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: { '$filter': `Name eq '${configName}'` },
-  })
-
-  const records = response.data.records || []
-  if (records.length > 0) {
-    await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, { 'Value': value })
-  } else {
-    await apiClient.post('/api/v1/models/AD_SysConfig', {
-      'AD_Org_ID': orgId,
-      'Name': configName,
-      'Value': value,
-      'Description': 'Patient tags',
-      'ConfigurationLevel': 'S',
-    })
-  }
+  await upsertSysConfig(`${TAG_PREFIX}${patientId}`, JSON.stringify(tags), orgId, 'Patient tags')
 }

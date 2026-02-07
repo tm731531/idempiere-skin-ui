@@ -8,6 +8,7 @@
 import { apiClient } from './client'
 import { type Prescription } from './doctor'
 import { getDispenseStatus } from './pharmacy'
+import { getSysConfigValue, upsertSysConfig } from './sysconfig'
 
 export type CheckoutStatus = 'PENDING' | 'PAID'
 
@@ -27,13 +28,9 @@ export interface CheckoutSummary {
 const CHECKOUT_PREFIX = 'CLINIC_CHECKOUT_STATUS_'
 
 export async function getCheckoutStatus(assignmentId: number): Promise<CheckoutStatus> {
-  const configName = `${CHECKOUT_PREFIX}${assignmentId}`
   try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: { '$filter': `Name eq '${configName}'` },
-    })
-    const records = response.data.records || []
-    return records.length > 0 ? (records[0].Value as CheckoutStatus) : 'PENDING'
+    const value = await getSysConfigValue(`${CHECKOUT_PREFIX}${assignmentId}`)
+    return (value as CheckoutStatus) || 'PENDING'
   } catch {
     return 'PENDING'
   }
@@ -44,24 +41,7 @@ export async function setCheckoutStatus(
   status: CheckoutStatus,
   orgId: number
 ): Promise<void> {
-  const configName = `${CHECKOUT_PREFIX}${assignmentId}`
-
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: { '$filter': `Name eq '${configName}'` },
-  })
-
-  const records = response.data.records || []
-  if (records.length > 0) {
-    await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, { 'Value': status })
-  } else {
-    await apiClient.post('/api/v1/models/AD_SysConfig', {
-      'AD_Org_ID': orgId,
-      'Name': configName,
-      'Value': status,
-      'Description': 'Clinic checkout status',
-      'ConfigurationLevel': 'S',
-    })
-  }
+  await upsertSysConfig(`${CHECKOUT_PREFIX}${assignmentId}`, status, orgId, 'Clinic checkout status')
 }
 
 /**

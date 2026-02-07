@@ -8,16 +8,8 @@
  */
 
 import { apiClient } from './client'
-
-// ========== Security Utils ==========
-
-function escapeODataString(value: string): string {
-  if (!value) return ''
-  return value
-    .replace(/'/g, "''")
-    .replace(/[<>{}|\\^~\[\]`]/g, '')
-    .trim()
-}
+import { upsertSysConfig, getSysConfigValue, listSysConfigByPrefix, deleteSysConfig } from './sysconfig'
+import { escapeODataString } from './utils'
 
 // ========== Types ==========
 
@@ -125,50 +117,22 @@ export async function savePrescription(
   prescription: Omit<Prescription, 'assignmentId'>,
   orgId: number
 ): Promise<void> {
-  const configName = `${PRESCRIPTION_PREFIX}${assignmentId}`
-  const value = JSON.stringify(prescription)
-
-  // Check if exists
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: {
-      '$filter': `Name eq '${configName}'`,
-    },
-  })
-
-  const records = response.data.records || []
-
-  if (records.length > 0) {
-    await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, {
-      'Value': value,
-    })
-  } else {
-    await apiClient.post('/api/v1/models/AD_SysConfig', {
-      'AD_Org_ID': orgId,
-      'Name': configName,
-      'Value': value,
-      'Description': 'Clinic prescription data',
-      'ConfigurationLevel': 'S',
-    })
-  }
+  await upsertSysConfig(
+    `${PRESCRIPTION_PREFIX}${assignmentId}`,
+    JSON.stringify(prescription),
+    orgId,
+    'Clinic prescription data',
+  )
 }
 
 /**
  * Load prescription for an assignment
  */
 export async function loadPrescription(assignmentId: number): Promise<Prescription | null> {
-  const configName = `${PRESCRIPTION_PREFIX}${assignmentId}`
-
   try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: {
-        '$filter': `Name eq '${configName}'`,
-      },
-    })
-
-    const records = response.data.records || []
-    if (records.length === 0) return null
-
-    const data = JSON.parse(records[0].Value)
+    const value = await getSysConfigValue(`${PRESCRIPTION_PREFIX}${assignmentId}`)
+    if (!value) return null
+    const data = JSON.parse(value)
     return { ...data, assignmentId }
   } catch {
     return null
@@ -180,19 +144,13 @@ export async function loadPrescription(assignmentId: number): Promise<Prescripti
  */
 export async function listPrescriptionHistory(): Promise<Prescription[]> {
   try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: {
-        '$filter': `contains(Name,'${PRESCRIPTION_PREFIX}')`,
-        '$orderby': 'Updated desc',
-        '$top': 50,
-      },
-    })
+    const records = await listSysConfigByPrefix(PRESCRIPTION_PREFIX, 'Updated desc', 50)
 
     const prescriptions: Prescription[] = []
-    for (const r of response.data.records || []) {
+    for (const r of records) {
       try {
-        const data = JSON.parse(r.Value)
-        const idMatch = r.Name.match(/(\d+)$/)
+        const data = JSON.parse(r.value)
+        const idMatch = r.name.match(/(\d+)$/)
         if (idMatch) {
           prescriptions.push({
             ...data,
@@ -223,20 +181,15 @@ export interface PrescriptionTemplate {
  */
 export async function listTemplates(): Promise<PrescriptionTemplate[]> {
   try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: {
-        '$filter': `contains(Name,'${TEMPLATE_PREFIX}')`,
-        '$orderby': 'Name asc',
-      },
-    })
+    const records = await listSysConfigByPrefix(TEMPLATE_PREFIX, 'Name asc')
 
     const templates: PrescriptionTemplate[] = []
-    for (const r of response.data.records || []) {
+    for (const r of records) {
       try {
-        const data = JSON.parse(r.Value)
+        const data = JSON.parse(r.value)
         templates.push({
-          id: r.Name,
-          name: data.name || r.Name.replace(TEMPLATE_PREFIX, ''),
+          id: r.name,
+          name: data.name || r.name.replace(TEMPLATE_PREFIX, ''),
           lines: data.lines || [],
           totalDays: data.totalDays || 7,
         })
@@ -260,37 +213,14 @@ export async function saveTemplate(
   const safeName = escapeODataString(templateName)
   const configName = `${TEMPLATE_PREFIX}${safeName}`
   const value = JSON.stringify({ name: templateName, lines, totalDays })
-
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: { '$filter': `Name eq '${configName}'` },
-  })
-
-  const records = response.data.records || []
-  if (records.length > 0) {
-    await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, { 'Value': value })
-  } else {
-    await apiClient.post('/api/v1/models/AD_SysConfig', {
-      'AD_Org_ID': orgId,
-      'Name': configName,
-      'Value': value,
-      'Description': `Prescription template: ${templateName}`,
-      'ConfigurationLevel': 'S',
-    })
-  }
+  await upsertSysConfig(configName, value, orgId, `Prescription template: ${templateName}`)
 }
 
 /**
  * Delete a prescription template
  */
 export async function deleteTemplate(configName: string): Promise<void> {
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: { '$filter': `Name eq '${configName}'` },
-  })
-
-  const records = response.data.records || []
-  if (records.length > 0) {
-    await apiClient.delete(`/api/v1/models/AD_SysConfig/${records[0].id}`)
-  }
+  await deleteSysConfig(configName)
 }
 
 /**
@@ -298,19 +228,14 @@ export async function deleteTemplate(configName: string): Promise<void> {
  */
 export async function listCompletedPrescriptions(): Promise<Prescription[]> {
   try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: {
-        '$filter': `contains(Name,'${PRESCRIPTION_PREFIX}')`,
-        '$orderby': 'Updated desc',
-      },
-    })
+    const records = await listSysConfigByPrefix(PRESCRIPTION_PREFIX, 'Updated desc')
 
     const prescriptions: Prescription[] = []
-    for (const r of response.data.records || []) {
+    for (const r of records) {
       try {
-        const data = JSON.parse(r.Value)
+        const data = JSON.parse(r.value)
         if (data.status === 'COMPLETED') {
-          const idMatch = r.Name.match(/(\d+)$/)
+          const idMatch = r.name.match(/(\d+)$/)
           if (idMatch) {
             prescriptions.push({
               ...data,

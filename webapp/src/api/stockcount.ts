@@ -7,6 +7,7 @@
  */
 
 import { apiClient } from './client'
+import { listSysConfigByPrefix, getSysConfigRecord, deleteSysConfig } from './sysconfig'
 
 // ========== Types ==========
 
@@ -42,20 +43,14 @@ const COUNT_PREFIX = 'CLINIC_COUNT_TASK_'
  */
 export async function listCountTasks(): Promise<CountTask[]> {
   try {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: {
-        '$filter': `contains(Name,'${COUNT_PREFIX}')`,
-        '$orderby': 'Updated desc',
-        '$top': 50,
-      },
-    })
+    const records = await listSysConfigByPrefix(COUNT_PREFIX, 'Updated desc', 50)
 
     const tasks: CountTask[] = []
-    for (const r of response.data.records || []) {
+    for (const r of records) {
       try {
-        const data = JSON.parse(r.Value)
+        const data = JSON.parse(r.value)
         tasks.push({
-          id: r.Name,
+          id: r.name,
           configId: r.id,
           name: data.name || '',
           warehouseName: data.warehouseName || '',
@@ -130,13 +125,9 @@ export async function updateCountTask(task: CountTask): Promise<void> {
       'Value': value,
     })
   } else {
-    const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-      params: { '$filter': `Name eq '${task.id}'` },
-    })
-
-    const records = response.data.records || []
-    if (records.length > 0) {
-      await apiClient.put(`/api/v1/models/AD_SysConfig/${records[0].id}`, {
+    const record = await getSysConfigRecord(task.id)
+    if (record) {
+      await apiClient.put(`/api/v1/models/AD_SysConfig/${record.id}`, {
         'Value': value,
       })
     }
@@ -156,12 +147,5 @@ export async function completeCountTask(task: CountTask): Promise<void> {
  * Delete a count task (delete the AD_SysConfig record)
  */
 export async function deleteCountTask(configName: string): Promise<void> {
-  const response = await apiClient.get('/api/v1/models/AD_SysConfig', {
-    params: { '$filter': `Name eq '${configName}'` },
-  })
-
-  const records = response.data.records || []
-  if (records.length > 0) {
-    await apiClient.delete(`/api/v1/models/AD_SysConfig/${records[0].id}`)
-  }
+  await deleteSysConfig(configName)
 }

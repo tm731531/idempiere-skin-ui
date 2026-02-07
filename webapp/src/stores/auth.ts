@@ -90,8 +90,7 @@ export const useAuthStore = defineStore('auth', () => {
       }
 
       return true
-    } catch (error) {
-      console.error('Authentication failed:', error)
+    } catch {
       loginError.value = '登入失敗，請檢查帳號密碼'
       return false
     } finally {
@@ -125,8 +124,7 @@ export const useAuthStore = defineStore('auth', () => {
       } else {
         loginStep.value = 'role'
       }
-    } catch (error) {
-      console.error('selectClient failed:', error)
+    } catch {
       loginError.value = '載入角色失敗'
     } finally {
       loginLoading.value = false
@@ -155,8 +153,7 @@ export const useAuthStore = defineStore('auth', () => {
       } else {
         loginStep.value = 'org'
       }
-    } catch (error) {
-      console.error('selectRole failed:', error)
+    } catch {
       loginError.value = '載入組織失敗'
     } finally {
       loginLoading.value = false
@@ -184,8 +181,7 @@ export const useAuthStore = defineStore('auth', () => {
       } else {
         loginStep.value = 'warehouse'
       }
-    } catch (error) {
-      console.error('selectOrg failed:', error)
+    } catch {
       loginError.value = '載入倉庫失敗'
     } finally {
       loginLoading.value = false
@@ -239,8 +235,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('auth_context', JSON.stringify(context.value))
       localStorage.setItem('auth_user', JSON.stringify(user.value))
       localStorage.setItem('auth_clients', JSON.stringify(availableClients.value))
-    } catch (error) {
-      console.error('selectWarehouse failed:', error)
+    } catch {
       loginError.value = '設定環境失敗'
     } finally {
       loginLoading.value = false
@@ -317,8 +312,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('auth_user', JSON.stringify(user.value))
 
       return true
-    } catch (error) {
-      console.error('Login failed:', error)
+    } catch {
       return false
     }
   }

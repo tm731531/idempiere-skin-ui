@@ -6,14 +6,7 @@
 
 import { apiClient } from './client'
 import { lookupEachUomId } from './lookup'
-
-function escapeODataString(value: string): string {
-  if (!value) return ''
-  return value
-    .replace(/'/g, "''")
-    .replace(/[<>{}|\\^~\[\]`]/g, '')
-    .trim()
-}
+import { escapeODataString } from './utils'
 
 /**
  * Create a new product (M_Product) with minimal required fields.
