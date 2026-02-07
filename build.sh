@@ -1,20 +1,19 @@
 #!/bin/bash
 #
 # iDempiere Clinic UI - Build & Deploy script
-# Produces a WAB (Web Application Bundle) directory for iDempiere OSGi/Jetty
+# Produces a WAB JAR (Web Application Bundle) for iDempiere OSGi/Jetty
 #
 # Usage:
-#   ./build.sh           # Build only
-#   ./build.sh --deploy  # Build + deploy to iDempiere plugins dir
+#   ./build.sh           # Build only (outputs JAR)
+#   ./build.sh --deploy  # Build + deploy JAR to iDempiere plugins/
 #
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEBAPP_DIR="$SCRIPT_DIR/webapp"
 BUNDLE_DIR="$SCRIPT_DIR/osgi-bundle"
-BUNDLE_NAME="org.idempiere.ui.clinic_1.0.0.qualifier"
+OUTPUT_JAR="$SCRIPT_DIR/org.idempiere.ui.clinic_1.0.0.jar"
 IDEMPIERE_HOME="${IDEMPIERE_HOME:-/opt/idempiere-server/x86_64}"
-OUTPUT_DIR="$SCRIPT_DIR/target/$BUNDLE_NAME"
 
 echo "=========================================="
 echo "  iDempiere Clinic UI - Build Script"
@@ -28,46 +27,35 @@ npm run build
 echo "Vue build complete"
 echo ""
 
-# Step 2: Assemble WAB directory
-echo "[2/3] Assembling WAB directory..."
-rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR/META-INF"
-mkdir -p "$OUTPUT_DIR/WEB-INF"
-
-# Copy MANIFEST.MF
-cp "$BUNDLE_DIR/META-INF/MANIFEST.MF" "$OUTPUT_DIR/META-INF/"
-
-# Copy WEB-INF/web.xml
-cp "$BUNDLE_DIR/WEB-INF/web.xml" "$OUTPUT_DIR/WEB-INF/"
-
-# Copy frontend build output as static files (at WAB root)
-cp -r "$BUNDLE_DIR/web/"* "$OUTPUT_DIR/"
-
-echo "WAB directory assembled: $OUTPUT_DIR"
+# Step 2: Build JAR
+# Key: use -C web . to place static files at JAR root (not under web/)
+echo "[2/3] Building OSGi JAR..."
+cd "$BUNDLE_DIR"
+jar cfm "$OUTPUT_JAR" META-INF/MANIFEST.MF \
+    -C . WEB-INF \
+    -C . plugin.xml \
+    -C web .
+echo "JAR built: $OUTPUT_JAR"
+echo "Size: $(ls -lh "$OUTPUT_JAR" | awk '{print $5}')"
 echo ""
 
 # Step 3: Deploy (optional)
 if [ "$1" = "--deploy" ]; then
-    DEPLOY_DIR="$IDEMPIERE_HOME/plugins/$BUNDLE_NAME"
-    echo "[3/3] Deploying to $DEPLOY_DIR ..."
-    rm -rf "$DEPLOY_DIR"
-    cp -r "$OUTPUT_DIR" "$DEPLOY_DIR"
+    DEPLOY_JAR="$IDEMPIERE_HOME/plugins/$(basename "$OUTPUT_JAR")"
+    echo "[3/3] Deploying to $DEPLOY_JAR ..."
+    cp "$OUTPUT_JAR" "$DEPLOY_JAR"
     echo "Deployed successfully."
     echo ""
-    echo "To activate, use OSGi console:"
+    echo "To activate, restart iDempiere or use OSGi console:"
     echo "  telnet localhost 12612"
-    echo "  install reference:file:plugins/$BUNDLE_NAME"
-    echo "  start <bundle-id>"
-    echo ""
-    echo "Or if already installed, just: update <bundle-id>"
+    echo "  update <bundle-id>"
 else
     echo "[3/3] Skipping deploy (use --deploy flag)"
     echo ""
     echo "To deploy manually:"
-    echo "  cp -r $OUTPUT_DIR $IDEMPIERE_HOME/plugins/"
-    echo "  # Then install/update via OSGi console"
+    echo "  cp $OUTPUT_JAR $IDEMPIERE_HOME/plugins/"
 fi
 
 echo ""
-echo "URL: https://<host>:8443/ui/"
+echo "URL: https://<host>:8443/ui/#/"
 echo "=========================================="
