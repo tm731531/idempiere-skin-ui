@@ -11,7 +11,7 @@
 import { apiClient } from './client'
 import { lookupCustomerGroupId } from './lookup'
 import { upsertSysConfig, getSysConfigValue, batchGetSysConfig } from './sysconfig'
-import { escapeODataString } from './utils'
+import { escapeODataString, toIdempiereDateTime } from './utils'
 
 // ========== Types ==========
 
@@ -25,9 +25,15 @@ export interface Patient {
 }
 
 export interface Doctor {
-  id: number              // AD_User_ID
+  id: number              // S_Resource_ID
   name: string
-  resourceId?: number     // S_Resource_ID (for booking)
+}
+
+export type RegistrationType = 'WALK_IN' | 'APPOINTMENT'
+
+export const TYPE_DISPLAY: Record<RegistrationType, { label: string; color: string }> = {
+  'WALK_IN':     { label: '現場', color: '#4CAF50' },
+  'APPOINTMENT': { label: '預約', color: '#2196F3' },
 }
 
 export interface Registration {
@@ -43,6 +49,7 @@ export interface Registration {
   status: RegistrationStatus
   isConfirmed: boolean
   description?: string
+  type: RegistrationType
 }
 
 export type RegistrationStatus = 'WAITING' | 'CALLING' | 'CONSULTING' | 'COMPLETED' | 'CANCELLED'
@@ -143,13 +150,15 @@ export async function createPatient(data: {
 // ========== Doctor API ==========
 
 /**
- * 查詢所有醫師
+ * 查詢所有醫師（直接查 S_Resource）
  */
 export async function listDoctors(): Promise<Doctor[]> {
-  const response = await apiClient.get('/api/v1/models/AD_User', {
+  const response = await apiClient.get('/api/v1/models/S_Resource', {
     params: {
-      '$filter': 'IsSalesRep eq true and IsActive eq true',
-      '$select': 'AD_User_ID,Name',
+      '$filter': 'IsActive eq true',
+      '$select': 'S_Resource_ID,Name',
+      '$orderby': 'Name asc',
+      '$top': 100,
     },
   })
 
@@ -159,54 +168,19 @@ export async function listDoctors(): Promise<Doctor[]> {
   }))
 }
 
-/**
- * 查詢醫師對應的資源 ID
- */
-export async function getDoctorResource(doctorName: string): Promise<number | null> {
-  const safeName = escapeODataString(doctorName)
-  const response = await apiClient.get('/api/v1/models/S_Resource', {
-    params: {
-      '$filter': `contains(Name,'${safeName}') and IsActive eq true`,
-      '$top': 1,
-    },
-  })
-
-  const records = response.data.records || []
-  return records.length > 0 ? records[0].id : null
-}
-
-/**
- * 批次查詢所有醫師資源（解決 N+1 問題）
- */
-export async function listDoctorResources(): Promise<Record<string, number>> {
-  const response = await apiClient.get('/api/v1/models/S_Resource', {
-    params: {
-      '$filter': 'IsActive eq true',
-      '$select': 'S_Resource_ID,Name',
-    },
-  })
-
-  const result: Record<string, number> = {}
-  for (const r of response.data.records || []) {
-    // 用名稱作為 key（醫師名稱 → 資源 ID）
-    result[r.Name] = r.id
-  }
-  return result
-}
-
 // ========== Registration API ==========
 
 /**
  * 取得今日下一個候診號碼
  */
-export async function getNextQueueNumber(resourceId: number): Promise<string> {
-  const today = new Date()
-  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+export async function getNextQueueNumber(resourceId: number, date?: Date): Promise<string> {
+  const target = date || new Date()
+  const startOfDay = new Date(target.getFullYear(), target.getMonth(), target.getDate())
+  const endOfDay = new Date(target.getFullYear(), target.getMonth(), target.getDate() + 1)
 
   const response = await apiClient.get('/api/v1/models/S_ResourceAssignment', {
     params: {
-      '$filter': `S_Resource_ID eq ${resourceId} and AssignDateFrom ge '${startOfDay.toISOString()}' and AssignDateFrom lt '${endOfDay.toISOString()}'`,
+      '$filter': `S_Resource_ID eq ${resourceId} and AssignDateFrom ge '${toIdempiereDateTime(startOfDay)}' and AssignDateFrom lt '${toIdempiereDateTime(endOfDay)}'`,
       '$select': 'Name',
       '$orderby': 'Name desc',
       '$top': 1,
@@ -228,23 +202,28 @@ export async function createRegistration(data: {
   patientTaxId: string
   queueNumber: string
   orgId: number
+  type: RegistrationType
+  appointmentDate?: Date
 }): Promise<Registration> {
-  const now = new Date()
-  const endTime = new Date(now.getTime() + 30 * 60 * 1000) // 30 分鐘後
+  // 預約掛號用指定日期 09:00，現場掛號用現在
+  const dateFrom = data.type === 'APPOINTMENT' && data.appointmentDate
+    ? new Date(data.appointmentDate.getFullYear(), data.appointmentDate.getMonth(), data.appointmentDate.getDate(), 9, 0, 0)
+    : new Date()
+  const dateTo = new Date(dateFrom.getTime() + 30 * 60 * 1000)
 
-  // 使用 JSON 格式儲存病人資訊（便於解析）
   const description = JSON.stringify({
     patientId: data.patientId,
     patientName: data.patientName,
     patientTaxId: data.patientTaxId,
+    type: data.type,
   })
 
   const response = await apiClient.post('/api/v1/models/S_ResourceAssignment', {
     'AD_Org_ID': data.orgId,
     'S_Resource_ID': data.resourceId,
     'Name': data.queueNumber,
-    'AssignDateFrom': now.toISOString(),
-    'AssignDateTo': endTime.toISOString(),
+    'AssignDateFrom': toIdempiereDateTime(dateFrom),
+    'AssignDateTo': toIdempiereDateTime(dateTo),
     'Qty': 1,
     'IsConfirmed': false,
     'Description': description,
@@ -261,22 +240,23 @@ export async function createRegistration(data: {
     patientId: data.patientId,
     patientName: data.patientName,
     patientTaxId: data.patientTaxId,
-    assignDateFrom: now.toISOString(),
-    assignDateTo: endTime.toISOString(),
+    assignDateFrom: toIdempiereDateTime(dateFrom),
+    assignDateTo: toIdempiereDateTime(dateTo),
     status: 'WAITING',
     isConfirmed: false,
+    type: data.type,
   }
 }
 
 /**
- * 查詢今日掛號清單
+ * 查詢指定日期掛號清單
  */
-export async function listTodayRegistrations(resourceId?: number): Promise<Registration[]> {
-  const today = new Date()
-  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+export async function listRegistrationsByDate(date?: Date, resourceId?: number): Promise<Registration[]> {
+  const target = date || new Date()
+  const startOfDay = new Date(target.getFullYear(), target.getMonth(), target.getDate())
+  const endOfDay = new Date(target.getFullYear(), target.getMonth(), target.getDate() + 1)
 
-  let filter = `AssignDateFrom ge '${startOfDay.toISOString()}' and AssignDateFrom lt '${endOfDay.toISOString()}'`
+  let filter = `AssignDateFrom ge '${toIdempiereDateTime(startOfDay)}' and AssignDateFrom lt '${toIdempiereDateTime(endOfDay)}'`
   if (resourceId) {
     filter += ` and S_Resource_ID eq ${resourceId}`
   }
@@ -295,28 +275,6 @@ export async function listTodayRegistrations(resourceId?: number): Promise<Regis
   const ids = records.map((r: any) => r.id)
   const statusMap = await getRegistrationStatuses(ids)
 
-  // 解析病人資訊（使用 JSON 格式，向前相容舊格式）
-  function parseDescription(desc: string): { patientId: number; patientName: string; patientTaxId: string } {
-    if (!desc) return { patientId: 0, patientName: '', patientTaxId: '' }
-
-    // 嘗試 JSON 格式
-    try {
-      const data = JSON.parse(desc)
-      return {
-        patientId: data.patientId || 0,
-        patientName: data.patientName || '',
-        patientTaxId: data.patientTaxId || '',
-      }
-    } catch {
-      // 舊格式: "姓名 (身分證) #ID"
-      const match = desc.match(/^(.+?) \((.+?)\) #(\d+)$/)
-      if (match && match[1] && match[2] && match[3]) {
-        return { patientId: parseInt(match[3]), patientName: match[1], patientTaxId: match[2] }
-      }
-      return { patientId: 0, patientName: desc, patientTaxId: '' }
-    }
-  }
-
   return records.map((r: any) => {
     const patientData = parseDescription(r.Description || '')
     return {
@@ -332,8 +290,40 @@ export async function listTodayRegistrations(resourceId?: number): Promise<Regis
       status: statusMap[r.id] || 'WAITING',
       isConfirmed: r.IsConfirmed,
       description: r.Description || '',
+      type: patientData.type,
     }
   })
+}
+
+/**
+ * 查詢今日掛號清單（便利包裝）
+ */
+export async function listTodayRegistrations(resourceId?: number): Promise<Registration[]> {
+  return listRegistrationsByDate(undefined, resourceId)
+}
+
+/**
+ * 解析 Description JSON（向前相容舊格式）
+ */
+function parseDescription(desc: string): { patientId: number; patientName: string; patientTaxId: string; type: RegistrationType } {
+  if (!desc) return { patientId: 0, patientName: '', patientTaxId: '', type: 'WALK_IN' }
+
+  try {
+    const data = JSON.parse(desc)
+    return {
+      patientId: data.patientId || 0,
+      patientName: data.patientName || '',
+      patientTaxId: data.patientTaxId || '',
+      type: data.type || 'WALK_IN',
+    }
+  } catch {
+    // 舊格式: "姓名 (身分證) #ID"
+    const match = desc.match(/^(.+?) \((.+?)\) #(\d+)$/)
+    if (match && match[1] && match[2] && match[3]) {
+      return { patientId: parseInt(match[3]), patientName: match[1], patientTaxId: match[2], type: 'WALK_IN' }
+    }
+    return { patientId: 0, patientName: desc, patientTaxId: '', type: 'WALK_IN' }
+  }
 }
 
 // ========== Status API (using AD_SysConfig) ==========
@@ -390,11 +380,6 @@ export async function callPatient(registrationId: number, orgId: number): Promis
  */
 export async function startConsultation(registrationId: number, orgId: number): Promise<void> {
   await setRegistrationStatus(registrationId, 'CONSULTING', orgId)
-
-  // 同時更新 IsConfirmed
-  await apiClient.put(`/api/v1/models/S_ResourceAssignment/${registrationId}`, {
-    'IsConfirmed': true,
-  })
 }
 
 /**

@@ -11,12 +11,13 @@ import {
   type Patient,
   type Doctor,
   type Registration,
+  type RegistrationType,
+  type RegistrationStatus,
   type PatientTag,
   findPatientByTaxId,
   searchPatients,
   createPatient,
   listDoctors,
-  listDoctorResources,
   getNextQueueNumber,
   createRegistration,
   listTodayRegistrations,
@@ -27,10 +28,19 @@ import {
   getPatientTags,
   setPatientTags,
 } from '@/api/registration'
+import { toDateString } from '@/api/utils'
 
 /** Check if auth context has a valid organizationId (zero is valid!) */
 function hasOrgContext(context: { organizationId: number } | null | undefined): context is { organizationId: number } {
   return context != null && context.organizationId !== null && context.organizationId !== undefined
+}
+
+/** Status rank for merge-based refresh — never regress status */
+const STATUS_RANK: Record<RegistrationStatus, number> = {
+  'WAITING': 0, 'CALLING': 1, 'CONSULTING': 2, 'COMPLETED': 3, 'CANCELLED': 3,
+}
+function statusRank(status: RegistrationStatus): number {
+  return STATUS_RANK[status] ?? 0
 }
 
 export const useRegistrationStore = defineStore('registration', () => {
@@ -51,6 +61,10 @@ export const useRegistrationStore = defineStore('registration', () => {
   // 掛號清單
   const todayRegistrations = ref<Registration[]>([])
   const isLoadingRegistrations = ref(false)
+
+  // 掛號類型
+  const registrationType = ref<RegistrationType>('WALK_IN')
+  const appointmentDate = ref<Date | null>(null)
 
   // 操作狀態
   const isRegistering = ref(false)
@@ -178,20 +192,7 @@ export const useRegistrationStore = defineStore('registration', () => {
     error.value = null
 
     try {
-      // 並行載入醫師和資源（解決 N+1 問題）
-      const [doctorList, resourceMap] = await Promise.all([
-        listDoctors(),
-        listDoctorResources(),
-      ])
-
-      // 用名稱匹配資源 ID
-      for (const doctor of doctorList) {
-        if (resourceMap[doctor.name]) {
-          doctor.resourceId = resourceMap[doctor.name]
-        }
-      }
-
-      doctors.value = doctorList
+      doctors.value = await listDoctors()
     } catch (e: any) {
       error.value = e.message || '載入醫師清單失敗'
     } finally {
@@ -215,7 +216,7 @@ export const useRegistrationStore = defineStore('registration', () => {
       return null
     }
 
-    if (!selectedDoctor.value?.resourceId) {
+    if (!selectedDoctor.value?.id) {
       error.value = '請先選擇醫師'
       return null
     }
@@ -225,29 +226,57 @@ export const useRegistrationStore = defineStore('registration', () => {
       return null
     }
 
+    // S_ResourceAssignment 不接受 org=0 (*)，自動找第一個非零組織
+    let orgId = authStore.context.organizationId
+    if (orgId === 0) {
+      const realOrg = authStore.availableOrgs.find(o => o.id !== 0)
+      if (!realOrg) {
+        error.value = '找不到可用的組織'
+        return null
+      }
+      orgId = realOrg.id
+    }
+
+    if (registrationType.value === 'APPOINTMENT' && !appointmentDate.value) {
+      error.value = '請選擇預約日期'
+      return null
+    }
+
     isRegistering.value = true
     error.value = null
 
     try {
-      // 取得下一個號碼
-      const queueNumber = await getNextQueueNumber(selectedDoctor.value.resourceId)
+      const targetDate = registrationType.value === 'APPOINTMENT' && appointmentDate.value
+        ? appointmentDate.value
+        : undefined
+
+      // 取得下一個號碼（依日期）
+      const queueNumber = await getNextQueueNumber(selectedDoctor.value.id, targetDate)
 
       // 建立掛號
       const registration = await createRegistration({
-        resourceId: selectedDoctor.value.resourceId,
+        resourceId: selectedDoctor.value.id,
         patientId: currentPatient.value.id,
         patientName: currentPatient.value.name,
         patientTaxId: currentPatient.value.taxId,
         queueNumber,
-        orgId: authStore.context.organizationId,
+        orgId,
+        type: registrationType.value,
+        appointmentDate: targetDate,
       })
 
-      // 加入清單
-      todayRegistrations.value.push(registration)
+      // 只有今天的掛號才加入本地清單
+      const today = toDateString(new Date())
+      const regDate = targetDate ? toDateString(targetDate) : today
+      if (regDate === today) {
+        todayRegistrations.value.push(registration)
+      }
 
       // 清除選擇
       currentPatient.value = null
       selectedDoctor.value = null
+      registrationType.value = 'WALK_IN'
+      appointmentDate.value = null
 
       return registration
     } catch (e: any) {
@@ -259,14 +288,26 @@ export const useRegistrationStore = defineStore('registration', () => {
   }
 
   /**
-   * 載入今日掛號清單
+   * 載入今日掛號清單（merge-based：不會把本地較新的狀態倒退）
    */
   async function loadTodayRegistrations(resourceId?: number): Promise<void> {
     isLoadingRegistrations.value = true
     error.value = null
 
     try {
-      todayRegistrations.value = await listTodayRegistrations(resourceId)
+      const serverData = await listTodayRegistrations(resourceId)
+
+      // 用本地 map 做 merge，避免 race condition 導致狀態倒退
+      const localMap = new Map(todayRegistrations.value.map(r => [r.id, r]))
+      const merged = serverData.map(serverReg => {
+        const localReg = localMap.get(serverReg.id)
+        if (localReg && statusRank(localReg.status) > statusRank(serverReg.status)) {
+          return { ...serverReg, status: localReg.status, isConfirmed: localReg.isConfirmed }
+        }
+        return serverReg
+      })
+
+      todayRegistrations.value = merged
     } catch (e: any) {
       error.value = e.message || '載入掛號清單失敗'
     } finally {
@@ -304,7 +345,6 @@ export const useRegistrationStore = defineStore('registration', () => {
       const reg = todayRegistrations.value.find(r => r.id === registrationId)
       if (reg) {
         reg.status = 'CONSULTING'
-        reg.isConfirmed = true
       }
     } catch (e: any) {
       error.value = e.message || '開始看診失敗'
@@ -403,6 +443,8 @@ export const useRegistrationStore = defineStore('registration', () => {
     isRegistering,
     error,
     patientTags,
+    registrationType,
+    appointmentDate,
 
     // Getters
     waitingList,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, computed, ref } from 'vue'
 import { useRegistrationStore } from '@/stores/registration'
-import { TAG_DISPLAY } from '@/api/registration'
+import { TAG_DISPLAY, TYPE_DISPLAY } from '@/api/registration'
 
 const store = useRegistrationStore()
 
@@ -87,9 +87,7 @@ async function refresh() {
 }
 
 // 可用醫師
-const availableDoctors = computed(() =>
-  store.doctors.filter(d => d.resourceId)
-)
+const availableDoctors = computed(() => store.doctors)
 
 </script>
 
@@ -108,11 +106,11 @@ const availableDoctors = computed(() =>
         v-for="doctor in availableDoctors"
         :key="doctor.id"
         class="filter-btn"
-        :class="{ active: selectedResourceId === doctor.resourceId }"
-        @click="selectedResourceId = doctor.resourceId || null"
+        :class="{ active: selectedResourceId === doctor.id }"
+        @click="selectedResourceId = doctor.id || null"
       >
         {{ doctor.name }}
-        <span class="badge">{{ store.waitingCountByDoctor[doctor.resourceId!] || 0 }}</span>
+        <span class="badge">{{ store.waitingCountByDoctor[doctor.id] || 0 }}</span>
       </button>
       <button class="refresh-btn" @click="refresh" :disabled="store.isLoadingRegistrations">
         🔄
@@ -132,6 +130,7 @@ const availableDoctors = computed(() =>
           <div class="queue-info">
             <div class="patient-name">
               {{ reg.patientName }}
+              <span class="reg-type-badge" :style="{ background: TYPE_DISPLAY[reg.type].color }">{{ TYPE_DISPLAY[reg.type].label }}</span>
               <span v-for="tag in getPatientTags(reg.patientId)" :key="tag" class="tag-badge" :title="TAG_DISPLAY[tag].label">{{ TAG_DISPLAY[tag].icon }}</span>
             </div>
             <div class="resource-name">{{ reg.resourceName }}</div>
@@ -158,6 +157,7 @@ const availableDoctors = computed(() =>
           <div class="queue-info">
             <div class="patient-name">
               {{ reg.patientName }}
+              <span class="reg-type-badge" :style="{ background: TYPE_DISPLAY[reg.type].color }">{{ TYPE_DISPLAY[reg.type].label }}</span>
               <span v-for="tag in getPatientTags(reg.patientId)" :key="tag" class="tag-badge" :title="TAG_DISPLAY[tag].label">{{ TAG_DISPLAY[tag].icon }}</span>
             </div>
             <div class="resource-name">{{ reg.resourceName }}</div>
@@ -200,6 +200,7 @@ const availableDoctors = computed(() =>
           <div class="queue-info">
             <div class="patient-name">
               {{ reg.patientName }}
+              <span class="reg-type-badge" :style="{ background: TYPE_DISPLAY[reg.type].color }">{{ TYPE_DISPLAY[reg.type].label }}</span>
               <span v-for="tag in getPatientTags(reg.patientId)" :key="tag" class="tag-badge" :title="TAG_DISPLAY[tag].label">{{ TAG_DISPLAY[tag].icon }}</span>
             </div>
             <div class="patient-id">{{ reg.patientTaxId }}</div>
@@ -418,5 +419,16 @@ const availableDoctors = computed(() =>
 .tag-badge {
   font-size: 0.75rem;
   margin-left: 0.125rem;
+}
+
+.reg-type-badge {
+  display: inline-block;
+  font-size: 0.625rem;
+  color: white;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 0.25rem;
+  margin-left: 0.375rem;
+  vertical-align: middle;
+  font-weight: 500;
 }
 </style>

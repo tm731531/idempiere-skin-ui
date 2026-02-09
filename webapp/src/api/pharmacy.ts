@@ -5,12 +5,15 @@
  * - 待配藥清單: AD_SysConfig (completed prescriptions)
  * - 庫存: M_StorageOnHand
  * - 配藥狀態: AD_SysConfig (CLINIC_DISPENSE_STATUS_{assignmentId})
+ * - 配藥記錄: AD_SysConfig (CLINIC_DISPENSE_RECORD_{assignmentId})
+ * - 扣庫存: M_Inventory (Internal Use)
  */
 
 import { apiClient } from './client'
 import { type Prescription, type PrescriptionLine, listCompletedPrescriptions } from './doctor'
-import { lookupDocTypeId, lookupEachUomId } from './lookup'
-import { getSysConfigValue, upsertSysConfig } from './sysconfig'
+import { lookupInternalUseDocTypeId, lookupDispenseChargeId } from './lookup'
+import { getSysConfigValue, upsertSysConfig, listSysConfigByPrefix } from './sysconfig'
+import { toDateString } from './utils'
 
 // ========== Types ==========
 
@@ -29,9 +32,24 @@ export interface StockInfo {
   warehouseName: string
 }
 
+export interface DispenseRecord {
+  assignmentId: number
+  patientName: string
+  dispensedAt: string
+  lines: { productId: number; productName: string; totalQuantity: number; unit: string }[]
+  inventoryId?: number
+}
+
+export interface StockDeductionResult {
+  inventoryId: number
+  completed: boolean
+  error?: string
+}
+
 // ========== Dispense Status API ==========
 
 const DISPENSE_PREFIX = 'CLINIC_DISPENSE_STATUS_'
+const DISPENSE_RECORD_PREFIX = 'CLINIC_DISPENSE_RECORD_'
 
 export async function getDispenseStatus(assignmentId: number): Promise<DispenseStatus> {
   try {
@@ -67,74 +85,122 @@ export async function listPendingDispense(): Promise<DispenseItem[]> {
   return items
 }
 
-// ========== Dispense Movement API (stock deduction) ==========
+// ========== Dispense Record API ==========
 
-export interface DispenseMovementResult {
-  movementId: number
-  completed: boolean
-  error?: string
+/**
+ * Save a record of what was dispensed for a given assignment.
+ */
+export async function saveDispenseRecord(
+  assignmentId: number,
+  record: Omit<DispenseRecord, 'assignmentId'>,
+  orgId: number,
+): Promise<void> {
+  await upsertSysConfig(
+    `${DISPENSE_RECORD_PREFIX}${assignmentId}`,
+    JSON.stringify(record),
+    orgId,
+    'Clinic dispense record',
+  )
 }
 
 /**
- * Create a stock deduction movement (M_Movement) for dispensed prescription items.
- *
- * Moves products from the pharmacy locator to a "dispensed" locator (same locator,
- * consuming stock) via internal use movement. This creates the accounting trail
- * in iDempiere so stock reports reflect dispensed quantities.
- *
- * @param lines - Prescription lines with productId and totalQuantity
- * @param fromLocatorId - Pharmacy locator where stock is held
- * @param toLocatorId - Destination locator (can be same as from for internal use)
- * @param orgId - Organization ID
- * @param description - Movement description (e.g. "Dispense for assignment 123")
+ * List all dispense records (for history view).
  */
-export async function createDispenseMovement(
+export async function listDispenseRecords(): Promise<DispenseRecord[]> {
+  try {
+    const records = await listSysConfigByPrefix(DISPENSE_RECORD_PREFIX, 'Updated desc', 50)
+    const result: DispenseRecord[] = []
+    for (const r of records) {
+      try {
+        const data = JSON.parse(r.value)
+        const idMatch = r.name.match(/(\d+)$/)
+        if (idMatch) {
+          result.push({ ...data, assignmentId: parseInt(idMatch[1]!, 10) })
+        }
+      } catch { /* skip invalid */ }
+    }
+    return result
+  } catch {
+    return []
+  }
+}
+
+// ========== Stock Deduction API (Internal Use Inventory) ==========
+
+/**
+ * Create an Internal Use Inventory (M_Inventory) to deduct stock.
+ *
+ * Uses C_DocType "Internal Use Inventory" (DocBaseType=MMI).
+ * Each line sets QtyInternalUse to deduct from the warehouse's default locator.
+ */
+export async function createStockDeduction(
   lines: Pick<PrescriptionLine, 'productId' | 'productName' | 'totalQuantity'>[],
-  fromLocatorId: number,
-  toLocatorId: number,
+  warehouseId: number,
   orgId: number,
   description?: string,
-): Promise<DispenseMovementResult> {
-  if (lines.length === 0) return { movementId: 0, completed: false, error: 'No lines to dispense' }
+): Promise<StockDeductionResult> {
+  if (lines.length === 0) return { inventoryId: 0, completed: false, error: 'No lines to deduct' }
 
-  const docTypeId = await lookupDocTypeId('MMM')
-  const uomId = await lookupEachUomId()
+  const [docTypeId, chargeId, locatorId] = await Promise.all([
+    lookupInternalUseDocTypeId(),
+    lookupDispenseChargeId(orgId),
+    lookupDefaultLocator(warehouseId),
+  ])
 
-  // Create M_Movement header
-  const headerRes = await apiClient.post('/api/v1/models/M_Movement', {
+  if (!locatorId) {
+    return { inventoryId: 0, completed: false, error: '找不到倉庫的預設庫位' }
+  }
+
+  // Create M_Inventory header
+  const headerRes = await apiClient.post('/api/v1/models/M_Inventory', {
     'AD_Org_ID': orgId,
     'C_DocType_ID': docTypeId,
-    'MovementDate': new Date().toISOString().slice(0, 10),
+    'M_Warehouse_ID': warehouseId,
+    'MovementDate': toDateString(new Date()),
     'Description': description || 'Clinic dispense',
   })
 
-  const movementId = headerRes.data.id
+  const inventoryId = headerRes.data.id
 
-  // Create M_MovementLine per prescription line
+  // Create M_InventoryLine per product
   for (const line of lines) {
     if (line.totalQuantity <= 0) continue
-    await apiClient.post('/api/v1/models/M_MovementLine', {
+    await apiClient.post('/api/v1/models/M_InventoryLine', {
       'AD_Org_ID': orgId,
-      'M_Movement_ID': movementId,
+      'M_Inventory_ID': inventoryId,
       'M_Product_ID': line.productId,
-      'M_Locator_ID': fromLocatorId,
-      'M_LocatorTo_ID': toLocatorId,
-      'C_UOM_ID': uomId,
-      'MovementQty': line.totalQuantity,
-      'QtyEntered': line.totalQuantity,
-      'TargetQty': 0,
+      'M_Locator_ID': locatorId,
+      'QtyInternalUse': line.totalQuantity,
+      'C_Charge_ID': chargeId,
     })
   }
 
-  // Complete the movement
+  // Complete the inventory
   try {
-    await apiClient.put(`/api/v1/models/M_Movement/${movementId}`, {
+    await apiClient.put(`/api/v1/models/M_Inventory/${inventoryId}`, {
       'doc-action': 'CO',
     })
-    return { movementId, completed: true }
+    return { inventoryId, completed: true }
   } catch (e: any) {
-    return { movementId, completed: false, error: e.response?.data?.detail || e.message || '配藥扣庫存失敗' }
+    return {
+      inventoryId,
+      completed: false,
+      error: e.response?.data?.detail || e.message || '扣庫存失敗',
+    }
   }
+}
+
+/**
+ * Lookup default locator for a warehouse.
+ */
+async function lookupDefaultLocator(warehouseId: number): Promise<number> {
+  const resp = await apiClient.get('/api/v1/models/M_Locator', {
+    params: {
+      '$filter': `M_Warehouse_ID eq ${warehouseId} and IsDefault eq true and IsActive eq true`,
+      '$top': 1,
+    },
+  })
+  return resp.data.records?.[0]?.id || 0
 }
 
 // ========== Stock API ==========

@@ -2,7 +2,7 @@
  * Pharmacy API Unit Tests
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getDispenseStatus, setDispenseStatus, listPendingDispense, getProductStock, listAllStock, createDispenseMovement } from '../pharmacy'
+import { getDispenseStatus, setDispenseStatus, listPendingDispense, getProductStock, listAllStock, createStockDeduction, saveDispenseRecord, listDispenseRecords } from '../pharmacy'
 import { apiClient } from '../client'
 import * as doctorApi from '../doctor'
 
@@ -15,8 +15,8 @@ vi.mock('../client', () => ({
 }))
 
 vi.mock('../lookup', () => ({
-  lookupDocTypeId: vi.fn().mockResolvedValue(100),
-  lookupEachUomId: vi.fn().mockResolvedValue(200),
+  lookupInternalUseDocTypeId: vi.fn().mockResolvedValue(200000),
+  lookupDispenseChargeId: vi.fn().mockResolvedValue(300),
 }))
 
 vi.mock('../doctor', () => ({
@@ -187,19 +187,32 @@ describe('listAllStock', () => {
   })
 })
 
-describe('createDispenseMovement', () => {
+describe('createStockDeduction', () => {
   it('returns early with error for empty lines', async () => {
-    const result = await createDispenseMovement([], 1, 2, 11)
-    expect(result).toEqual({ movementId: 0, completed: false, error: 'No lines to dispense' })
+    const result = await createStockDeduction([], 103, 11)
+    expect(result).toEqual({ inventoryId: 0, completed: false, error: 'No lines to deduct' })
     expect(mockPost).not.toHaveBeenCalled()
   })
 
-  it('creates movement header and lines, then completes', async () => {
-    // POST movement header
+  it('returns error when no locator found', async () => {
+    // lookupDefaultLocator returns 0
+    mockGet.mockResolvedValue({ data: { records: [] } })
+
+    const lines = [{ productId: 10, productName: 'Aspirin', totalQuantity: 9 }]
+    const result = await createStockDeduction(lines, 103, 11)
+
+    expect(result.completed).toBe(false)
+    expect(result.error).toContain('庫位')
+  })
+
+  it('creates inventory header, lines, and completes', async () => {
+    // lookupDefaultLocator
+    mockGet.mockResolvedValue({ data: { records: [{ id: 101 }] } })
+    // POST inventory header, then lines
     mockPost
-      .mockResolvedValueOnce({ data: { id: 500 } }) // M_Movement header
-      .mockResolvedValueOnce({ data: { id: 501 } }) // M_MovementLine 1
-      .mockResolvedValueOnce({ data: { id: 502 } }) // M_MovementLine 2
+      .mockResolvedValueOnce({ data: { id: 600 } }) // M_Inventory header
+      .mockResolvedValueOnce({ data: { id: 601 } }) // M_InventoryLine 1
+      .mockResolvedValueOnce({ data: { id: 602 } }) // M_InventoryLine 2
     // PUT doc-action
     mockPut.mockResolvedValue({ data: {} })
 
@@ -208,39 +221,41 @@ describe('createDispenseMovement', () => {
       { productId: 20, productName: 'Ibuprofen', totalQuantity: 10 },
     ]
 
-    const result = await createDispenseMovement(lines, 100, 200, 11, 'Test dispense')
-    expect(result).toEqual({ movementId: 500, completed: true })
+    const result = await createStockDeduction(lines, 103, 11, 'Test dispense')
+    expect(result).toEqual({ inventoryId: 600, completed: true })
 
     // Verify header
-    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_Movement', expect.objectContaining({
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_Inventory', expect.objectContaining({
       'AD_Org_ID': 11,
+      'C_DocType_ID': 200000,
+      'M_Warehouse_ID': 103,
       'Description': 'Test dispense',
     }))
 
-    // Verify lines
-    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_MovementLine', expect.objectContaining({
-      'M_Movement_ID': 500,
+    // Verify lines use QtyInternalUse and C_Charge_ID
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_InventoryLine', expect.objectContaining({
+      'M_Inventory_ID': 600,
       'M_Product_ID': 10,
-      'M_Locator_ID': 100,
-      'M_LocatorTo_ID': 200,
-      'MovementQty': 9,
+      'M_Locator_ID': 101,
+      'QtyInternalUse': 9,
+      'C_Charge_ID': 300,
     }))
-    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_MovementLine', expect.objectContaining({
-      'M_Movement_ID': 500,
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/M_InventoryLine', expect.objectContaining({
       'M_Product_ID': 20,
-      'MovementQty': 10,
+      'QtyInternalUse': 10,
     }))
 
     // Verify doc-action
-    expect(mockPut).toHaveBeenCalledWith('/api/v1/models/M_Movement/500', {
+    expect(mockPut).toHaveBeenCalledWith('/api/v1/models/M_Inventory/600', {
       'doc-action': 'CO',
     })
   })
 
   it('skips lines with zero quantity', async () => {
+    mockGet.mockResolvedValue({ data: { records: [{ id: 101 }] } })
     mockPost
-      .mockResolvedValueOnce({ data: { id: 500 } }) // header
-      .mockResolvedValueOnce({ data: { id: 501 } }) // only 1 line
+      .mockResolvedValueOnce({ data: { id: 600 } }) // header
+      .mockResolvedValueOnce({ data: { id: 601 } }) // only 1 line
     mockPut.mockResolvedValue({ data: {} })
 
     const lines = [
@@ -248,21 +263,72 @@ describe('createDispenseMovement', () => {
       { productId: 20, productName: 'Zero', totalQuantity: 0 },
     ]
 
-    await createDispenseMovement(lines, 100, 200, 11)
+    await createStockDeduction(lines, 103, 11)
 
     // header + 1 line = 2 POST calls (not 3)
     expect(mockPost).toHaveBeenCalledTimes(2)
   })
 
   it('returns error when completion fails', async () => {
-    mockPost.mockResolvedValue({ data: { id: 500 } })
+    mockGet.mockResolvedValue({ data: { records: [{ id: 101 }] } })
+    mockPost.mockResolvedValue({ data: { id: 600 } })
     mockPut.mockRejectedValue({ response: { data: { detail: 'Completion failed' } } })
 
     const lines = [{ productId: 10, productName: 'A', totalQuantity: 5 }]
-    const result = await createDispenseMovement(lines, 100, 200, 11)
+    const result = await createStockDeduction(lines, 103, 11)
 
-    expect(result.movementId).toBe(500)
+    expect(result.inventoryId).toBe(600)
     expect(result.completed).toBe(false)
     expect(result.error).toBe('Completion failed')
+  })
+})
+
+describe('saveDispenseRecord', () => {
+  it('saves record to SysConfig', async () => {
+    mockGet.mockResolvedValue({ data: { records: [] } })
+    mockPost.mockResolvedValue({ data: {} })
+
+    await saveDispenseRecord(100, {
+      patientName: 'John',
+      dispensedAt: '2026-02-08T10:00:00Z',
+      lines: [{ productId: 10, productName: 'Aspirin', totalQuantity: 9, unit: 'g' }],
+      inventoryId: 600,
+    }, 11)
+
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig', expect.objectContaining({
+      'Name': 'CLINIC_DISPENSE_RECORD_100',
+    }))
+    const value = JSON.parse(mockPost.mock.calls[0][1]['Value'])
+    expect(value.patientName).toBe('John')
+    expect(value.lines[0].productName).toBe('Aspirin')
+    expect(value.inventoryId).toBe(600)
+  })
+})
+
+describe('listDispenseRecords', () => {
+  it('returns parsed records', async () => {
+    const record = {
+      patientName: 'John',
+      dispensedAt: '2026-02-08T10:00:00Z',
+      lines: [{ productId: 10, productName: 'Aspirin', totalQuantity: 9, unit: 'g' }],
+    }
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          { id: 1, Name: 'CLINIC_DISPENSE_RECORD_100', Value: JSON.stringify(record) },
+        ],
+      },
+    })
+
+    const result = await listDispenseRecords()
+    expect(result).toHaveLength(1)
+    expect(result[0].assignmentId).toBe(100)
+    expect(result[0].patientName).toBe('John')
+  })
+
+  it('returns empty array on error', async () => {
+    mockGet.mockRejectedValue(new Error('fail'))
+    const result = await listDispenseRecords()
+    expect(result).toEqual([])
   })
 })

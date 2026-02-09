@@ -31,19 +31,23 @@ apiClient.interceptors.request.use(
   }
 )
 
+// Session expired state — UI should check this and show a banner
+export const sessionState = { expired: false }
+export function clearSessionExpired() { sessionState.expired = false }
+
 // Response interceptor
 apiClient.interceptors.response.use(
   (response) => {
     return response
   },
   (error) => {
-    // 401 未授權 - 清除所有 auth 資料，跳轉登入
+    // 401 未授權 — set flag instead of auto-logout (avoid wiping in-progress state)
     if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('auth_context')
-      localStorage.removeItem('auth_user')
-      window.location.hash = '#/login'
-      window.location.reload()
+      const url = error.config?.url || ''
+      // Auth endpoints (login flow) should not set sessionExpired
+      if (!url.includes('/api/v1/auth/')) {
+        sessionState.expired = true
+      }
     }
     return Promise.reject(error)
   }

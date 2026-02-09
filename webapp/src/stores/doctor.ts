@@ -301,6 +301,101 @@ export const useDoctorStore = defineStore('doctor', () => {
     }
   }
 
+  // ========== Template Editor (standalone create/edit) ==========
+
+  const isEditorOpen = ref(false)
+  const editorName = ref('')
+  const editorLines = ref<PrescriptionLine[]>([])
+  const editorTotalDays = ref(7)
+  const editingTemplateId = ref<string | null>(null)
+
+  function openTemplateEditor(template?: PrescriptionTemplate): void {
+    isEditorOpen.value = true
+    if (template) {
+      editingTemplateId.value = template.id
+      editorName.value = template.name
+      editorLines.value = template.lines.map(line => ({ ...line }))
+      editorTotalDays.value = template.totalDays
+    } else {
+      editingTemplateId.value = null
+      editorName.value = ''
+      editorLines.value = []
+      editorTotalDays.value = 7
+    }
+    error.value = null
+  }
+
+  function closeTemplateEditor(): void {
+    isEditorOpen.value = false
+    editorName.value = ''
+    editorLines.value = []
+    editorTotalDays.value = 7
+    editingTemplateId.value = null
+  }
+
+  function editorAddMedicine(medicine: Medicine, dosage: number = 3, frequency: string = 'TID', days?: number): void {
+    const d = days || editorTotalDays.value
+    editorLines.value.push({
+      productId: medicine.id,
+      productName: medicine.name,
+      dosage,
+      unit: 'g',
+      frequency: frequency as PrescriptionLine['frequency'],
+      days: d,
+      totalQuantity: calculateTotalQuantity(dosage, frequency, d),
+    })
+  }
+
+  function editorRemoveMedicine(index: number): void {
+    editorLines.value.splice(index, 1)
+  }
+
+  function editorUpdateLine(index: number, updates: Partial<PrescriptionLine>): void {
+    const line = editorLines.value[index]
+    if (!line) return
+    Object.assign(line, updates)
+    line.totalQuantity = calculateTotalQuantity(line.dosage, line.frequency, line.days)
+  }
+
+  function editorSetTotalDays(days: number): void {
+    editorTotalDays.value = days
+    for (const line of editorLines.value) {
+      line.days = days
+      line.totalQuantity = calculateTotalQuantity(line.dosage, line.frequency, days)
+    }
+  }
+
+  async function saveTemplateFromEditor(): Promise<boolean> {
+    if (!authStore.context?.organizationId && authStore.context?.organizationId !== 0) {
+      error.value = '請先登入以設定組織環境'
+      return false
+    }
+    const name = editorName.value.trim()
+    if (!name) {
+      error.value = '請輸入範本名稱'
+      return false
+    }
+    if (editorLines.value.length === 0) {
+      error.value = '請至少加入一項藥品'
+      return false
+    }
+
+    isSaving.value = true
+    error.value = null
+
+    try {
+      await saveTemplate(name, editorLines.value, editorTotalDays.value, authStore.context!.organizationId)
+      await loadTemplateList()
+      closeTemplateEditor()
+      return true
+    } catch (e: any) {
+      error.value = e.message || 'Failed to save template'
+      return false
+    } finally {
+      isSaving.value = false
+    }
+  }
+
   /**
    * Clear current consultation
    */
@@ -359,5 +454,19 @@ export const useDoctorStore = defineStore('doctor', () => {
     removeTemplate,
     applyTemplate,
     applyHistoryPrescription,
+
+    // Template editor
+    isEditorOpen,
+    editorName,
+    editorLines,
+    editorTotalDays,
+    editingTemplateId,
+    openTemplateEditor,
+    closeTemplateEditor,
+    editorAddMedicine,
+    editorRemoveMedicine,
+    editorUpdateLine,
+    editorSetTotalDays,
+    saveTemplateFromEditor,
   }
 })

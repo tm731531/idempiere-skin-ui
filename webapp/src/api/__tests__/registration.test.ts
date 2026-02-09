@@ -7,9 +7,9 @@ import {
   searchPatients,
   createPatient,
   listDoctors,
-  getDoctorResource,
-  listDoctorResources,
   getNextQueueNumber,
+  createRegistration,
+  listRegistrationsByDate,
   callPatient,
   startConsultation,
   completeConsultation,
@@ -128,41 +128,7 @@ describe('createPatient', () => {
 })
 
 describe('listDoctors', () => {
-  it('returns mapped doctors', async () => {
-    mockGet.mockResolvedValue({
-      data: {
-        records: [
-          { id: 10, Name: 'Dr. Smith' },
-          { id: 11, Name: 'Dr. Jones' },
-        ],
-      },
-    })
-
-    const result = await listDoctors()
-    expect(result).toHaveLength(2)
-    expect(result[0]).toEqual({ id: 10, name: 'Dr. Smith' })
-  })
-})
-
-describe('getDoctorResource', () => {
-  it('returns resource ID when found', async () => {
-    mockGet.mockResolvedValue({
-      data: { records: [{ id: 500 }] },
-    })
-
-    const result = await getDoctorResource('Dr. Smith')
-    expect(result).toBe(500)
-  })
-
-  it('returns null when not found', async () => {
-    mockGet.mockResolvedValue({ data: { records: [] } })
-    const result = await getDoctorResource('Dr. Nobody')
-    expect(result).toBeNull()
-  })
-})
-
-describe('listDoctorResources', () => {
-  it('returns name-to-id map', async () => {
+  it('returns doctors from S_Resource', async () => {
     mockGet.mockResolvedValue({
       data: {
         records: [
@@ -172,11 +138,17 @@ describe('listDoctorResources', () => {
       },
     })
 
-    const result = await listDoctorResources()
-    expect(result).toEqual({
-      'Dr. Smith': 500,
-      'Dr. Jones': 501,
-    })
+    const result = await listDoctors()
+    expect(result).toHaveLength(2)
+    expect(result[0]).toEqual({ id: 500, name: 'Dr. Smith' })
+    expect(result[1]).toEqual({ id: 501, name: 'Dr. Jones' })
+
+    // Verify it queries S_Resource (not AD_User)
+    expect(mockGet).toHaveBeenCalledWith('/api/v1/models/S_Resource', expect.objectContaining({
+      params: expect.objectContaining({
+        '$filter': 'IsActive eq true',
+      }),
+    }))
   })
 })
 
@@ -218,19 +190,15 @@ describe('status update functions', () => {
     }))
   })
 
-  it('startConsultation sets CONSULTING and updates IsConfirmed', async () => {
+  it('startConsultation sets CONSULTING', async () => {
     mockGet.mockResolvedValue({ data: { records: [] } })
     mockPost.mockResolvedValue({ data: {} })
-    mockPut.mockResolvedValue({ data: {} })
 
     await startConsultation(100, 11)
 
     expect(mockPost).toHaveBeenCalledWith('/api/v1/models/AD_SysConfig', expect.objectContaining({
       'Value': 'CONSULTING',
     }))
-    expect(mockPut).toHaveBeenCalledWith('/api/v1/models/S_ResourceAssignment/100', {
-      'IsConfirmed': true,
-    })
   })
 
   it('completeConsultation sets COMPLETED', async () => {
@@ -312,5 +280,116 @@ describe('setPatientTags', () => {
       'ConfigurationLevel': 'S',
     })
     expect(mockPut).not.toHaveBeenCalled()
+  })
+})
+
+describe('getNextQueueNumber with date param', () => {
+  it('uses provided date for filtering', async () => {
+    mockGet.mockResolvedValue({ data: { records: [] } })
+    const targetDate = new Date(2026, 1, 15) // Feb 15
+
+    await getNextQueueNumber(100, targetDate)
+
+    const filter = mockGet.mock.calls[0][1]?.params?.['$filter']
+    // Should filter by Feb 15 start/end
+    expect(filter).toContain('2026-02-15')
+  })
+})
+
+describe('createRegistration', () => {
+  it('creates walk-in registration with type in description', async () => {
+    mockPost.mockResolvedValue({ data: { id: 555 } })
+    // Mock for setRegistrationStatus
+    mockGet.mockResolvedValue({ data: { records: [] } })
+
+    const result = await createRegistration({
+      resourceId: 100,
+      patientId: 200,
+      patientName: 'John',
+      patientTaxId: 'A123',
+      queueNumber: '001',
+      orgId: 11,
+      type: 'WALK_IN',
+    })
+
+    expect(result.id).toBe(555)
+    expect(result.type).toBe('WALK_IN')
+
+    // Check that Description JSON includes type
+    const postBody = mockPost.mock.calls[0][1]
+    const desc = JSON.parse(postBody['Description'])
+    expect(desc.type).toBe('WALK_IN')
+    expect(desc.patientId).toBe(200)
+  })
+
+  it('creates appointment registration with future date', async () => {
+    mockPost.mockResolvedValue({ data: { id: 556 } })
+    mockGet.mockResolvedValue({ data: { records: [] } })
+
+    const futureDate = new Date(2026, 1, 20)
+    const result = await createRegistration({
+      resourceId: 100,
+      patientId: 200,
+      patientName: 'Jane',
+      patientTaxId: 'B456',
+      queueNumber: '001',
+      orgId: 11,
+      type: 'APPOINTMENT',
+      appointmentDate: futureDate,
+    })
+
+    expect(result.type).toBe('APPOINTMENT')
+
+    // Check that date uses 09:00 of the appointment day
+    const postBody = mockPost.mock.calls[0][1]
+    expect(postBody['AssignDateFrom']).toContain('2026-02-20')
+  })
+})
+
+describe('listRegistrationsByDate', () => {
+  it('parses type from description JSON', async () => {
+    const desc = JSON.stringify({ patientId: 100, patientName: 'John', patientTaxId: 'A123', type: 'APPOINTMENT' })
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          { id: 1, S_Resource_ID: { id: 101, identifier: 'Dr. A' }, Name: '001', AssignDateFrom: '2026-02-08T09:00:00Z', AssignDateTo: '2026-02-08T09:30:00Z', IsConfirmed: false, Description: desc },
+        ],
+      },
+    })
+
+    const result = await listRegistrationsByDate()
+
+    expect(result[0].type).toBe('APPOINTMENT')
+    expect(result[0].patientName).toBe('John')
+  })
+
+  it('defaults type to WALK_IN for old records without type', async () => {
+    const desc = JSON.stringify({ patientId: 100, patientName: 'Old', patientTaxId: 'X' })
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          { id: 2, S_Resource_ID: { id: 101, identifier: 'Dr. A' }, Name: '002', AssignDateFrom: '2026-02-08T09:00:00Z', AssignDateTo: '2026-02-08T09:30:00Z', IsConfirmed: false, Description: desc },
+        ],
+      },
+    })
+
+    const result = await listRegistrationsByDate()
+    expect(result[0].type).toBe('WALK_IN')
+  })
+
+  it('handles old-format description (non-JSON)', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        records: [
+          { id: 3, S_Resource_ID: { id: 101, identifier: 'Dr. A' }, Name: '003', AssignDateFrom: '2026-02-08T09:00:00Z', AssignDateTo: '2026-02-08T09:30:00Z', IsConfirmed: false, Description: '王小明 (A123456789) #100' },
+        ],
+      },
+    })
+
+    const result = await listRegistrationsByDate()
+    expect(result[0].patientName).toBe('王小明')
+    expect(result[0].patientTaxId).toBe('A123456789')
+    expect(result[0].patientId).toBe(100)
+    expect(result[0].type).toBe('WALK_IN')
   })
 })

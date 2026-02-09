@@ -13,7 +13,8 @@ import {
   listPendingDispense,
   setDispenseStatus,
   getProductStock,
-  createDispenseMovement,
+  createStockDeduction,
+  saveDispenseRecord,
 } from '@/api/pharmacy'
 
 export const usePharmacyStore = defineStore('pharmacy', () => {
@@ -75,50 +76,38 @@ export const usePharmacyStore = defineStore('pharmacy', () => {
     try {
       await setDispenseStatus(assignmentId, 'DISPENSED', orgId)
 
-      // Create stock deduction movement if we have prescription lines
       const item = dispenseQueue.value.find(i => i.assignmentId === assignmentId)
-      if (item && item.prescription?.lines && item.prescription.lines.length > 0 && warehouseId) {
-        const { apiClient } = await import('@/api/client')
-        // Look up default locator for current warehouse (source)
-        const fromLocRes = await apiClient.get('/api/v1/models/M_Locator', {
-          params: {
-            '$filter': `M_Warehouse_ID eq ${warehouseId} and IsDefault eq true and IsActive eq true`,
-            '$top': 1,
-          },
-        })
-        const fromLocatorId = fromLocRes.data.records?.[0]?.id
+      let inventoryId: number | undefined
 
-        // Look up Counter warehouse locator (dispensing destination)
-        const counterWhRes = await apiClient.get('/api/v1/models/M_Warehouse', {
-          params: {
-            '$filter': "Name eq 'Counter' and IsActive eq true",
-            '$top': 1,
-          },
-        })
-        let toLocatorId = 0
-        const counterWhId = counterWhRes.data.records?.[0]?.id
-        if (counterWhId) {
-          const toLocRes = await apiClient.get('/api/v1/models/M_Locator', {
-            params: {
-              '$filter': `M_Warehouse_ID eq ${counterWhId} and IsActive eq true`,
-              '$top': 1,
-            },
-          })
-          toLocatorId = toLocRes.data.records?.[0]?.id || 0
+      // Create Internal Use Inventory to deduct stock
+      if (item?.prescription?.lines && item.prescription.lines.length > 0 && warehouseId) {
+        const result = await createStockDeduction(
+          item.prescription.lines,
+          warehouseId,
+          orgId,
+          `配藥扣庫存 - ${item.prescription.patientName} (掛號 ${assignmentId})`,
+        )
+        if (!result.completed && result.error) {
+          error.value = `配藥完成但扣庫存失敗: ${result.error}`
         }
+        if (result.inventoryId) {
+          inventoryId = result.inventoryId
+        }
+      }
 
-        if (fromLocatorId && toLocatorId && fromLocatorId !== toLocatorId) {
-          const result = await createDispenseMovement(
-            item!.prescription.lines,
-            fromLocatorId,
-            toLocatorId,
-            orgId,
-            `Clinic dispense for assignment ${assignmentId}`,
-          )
-          if (!result.completed && result.error) {
-            error.value = `配藥完成但扣庫存失敗: ${result.error}`
-          }
-        }
+      // Save dispense record
+      if (item) {
+        await saveDispenseRecord(assignmentId, {
+          patientName: item.prescription.patientName,
+          dispensedAt: new Date().toISOString(),
+          lines: item.prescription.lines.map(l => ({
+            productId: l.productId,
+            productName: l.productName,
+            totalQuantity: l.totalQuantity,
+            unit: l.unit,
+          })),
+          inventoryId,
+        }, orgId)
       }
 
       // Remove from queue

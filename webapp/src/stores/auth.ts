@@ -235,6 +235,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('auth_context', JSON.stringify(context.value))
       localStorage.setItem('auth_user', JSON.stringify(user.value))
       localStorage.setItem('auth_clients', JSON.stringify(availableClients.value))
+      localStorage.setItem('auth_orgs', JSON.stringify(availableOrgs.value))
     } catch {
       loginError.value = '設定環境失敗'
     } finally {
@@ -351,6 +352,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('auth_context')
     localStorage.removeItem('auth_user')
     localStorage.removeItem('auth_clients')
+    localStorage.removeItem('auth_orgs')
     delete apiClient.defaults.headers.common['Authorization']
     clearLookupCache()
   }
@@ -368,6 +370,10 @@ export const useAuthStore = defineStore('auth', () => {
         if (savedClients) {
           availableClients.value = JSON.parse(savedClients)
         }
+        const savedOrgs = localStorage.getItem('auth_orgs')
+        if (savedOrgs) {
+          availableOrgs.value = JSON.parse(savedOrgs)
+        }
         loginStep.value = 'done'
       } catch {
         // 損壞資料 → 強制重新登入
@@ -375,6 +381,7 @@ export const useAuthStore = defineStore('auth', () => {
         localStorage.removeItem('auth_context')
         localStorage.removeItem('auth_user')
         localStorage.removeItem('auth_clients')
+        localStorage.removeItem('auth_orgs')
         token.value = null
       }
     } else {

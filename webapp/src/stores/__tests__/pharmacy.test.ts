@@ -10,7 +10,8 @@ vi.mock('@/api/pharmacy', () => ({
   listPendingDispense: vi.fn(),
   setDispenseStatus: vi.fn(),
   getProductStock: vi.fn(),
-  createDispenseMovement: vi.fn().mockResolvedValue({ movementId: 1, completed: true }),
+  createStockDeduction: vi.fn().mockResolvedValue({ inventoryId: 1, completed: true }),
+  saveDispenseRecord: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@/api/client', () => ({
@@ -143,8 +144,8 @@ describe('Pharmacy Store', () => {
       authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       store.dispenseQueue = [
-        { assignmentId: 100, prescription: {} as any, status: 'DISPENSING' },
-        { assignmentId: 101, prescription: {} as any, status: 'PENDING' },
+        { assignmentId: 100, prescription: { patientName: 'Test', lines: [], diagnosis: '', totalDays: 7, status: 'COMPLETED', createdAt: '', patientId: 1 } as any, status: 'DISPENSING' },
+        { assignmentId: 101, prescription: { patientName: 'Test2', lines: [], diagnosis: '', totalDays: 7, status: 'COMPLETED', createdAt: '', patientId: 2 } as any, status: 'PENDING' },
       ]
       store.currentItem = store.dispenseQueue[0]
 

@@ -11,7 +11,6 @@ vi.mock('@/api/registration', () => ({
   searchPatients: vi.fn(),
   createPatient: vi.fn(),
   listDoctors: vi.fn(),
-  listDoctorResources: vi.fn(),
   getNextQueueNumber: vi.fn(),
   createRegistration: vi.fn(),
   listTodayRegistrations: vi.fn(),
@@ -150,22 +149,18 @@ describe('Registration Store', () => {
   })
 
   describe('loadDoctors', () => {
-    it('loads doctors with resource IDs', async () => {
+    it('loads doctors from S_Resource', async () => {
       vi.mocked(registrationApi.listDoctors).mockResolvedValue([
-        { id: 10, name: 'Dr. A' },
-        { id: 20, name: 'Dr. B' },
+        { id: 101, name: 'Dr. A' },
+        { id: 102, name: 'Dr. B' },
       ])
-      vi.mocked(registrationApi.listDoctorResources).mockResolvedValue({
-        'Dr. A': 101,
-        'Dr. B': 102,
-      })
 
       const store = useRegistrationStore()
       await store.loadDoctors()
 
       expect(store.doctors).toHaveLength(2)
-      expect(store.doctors[0].resourceId).toBe(101)
-      expect(store.doctors[1].resourceId).toBe(102)
+      expect(store.doctors[0]).toEqual({ id: 101, name: 'Dr. A' })
+      expect(store.doctors[1]).toEqual({ id: 102, name: 'Dr. B' })
     })
   })
 
@@ -177,10 +172,10 @@ describe('Registration Store', () => {
       expect(store.error).toBe('請先選擇病人')
     })
 
-    it('requires doctor with resourceId', async () => {
+    it('requires doctor with valid id', async () => {
       const store = useRegistrationStore()
       store.currentPatient = { id: 100, value: 'P1', name: 'John', taxId: 'A123', isActive: true }
-      store.selectedDoctor = { id: 10, name: 'Dr. A' } // no resourceId
+      store.selectedDoctor = { id: 0, name: 'Dr. A' } // id=0 is invalid
 
       const result = await store.register()
       expect(result).toBeNull()
@@ -191,7 +186,7 @@ describe('Registration Store', () => {
   describe('loadTodayRegistrations', () => {
     it('loads registrations', async () => {
       const regs = [
-        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'WAITING' as const, isConfirmed: false },
+        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'WAITING' as const, isConfirmed: false, type: 'WALK_IN' as const },
       ]
       vi.mocked(registrationApi.listTodayRegistrations).mockResolvedValue(regs)
 
@@ -210,7 +205,7 @@ describe('Registration Store', () => {
       authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       store.todayRegistrations = [
-        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
+        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
       ]
       return store
     }
@@ -229,7 +224,6 @@ describe('Registration Store', () => {
 
       await store.startConsult(1)
       expect(store.todayRegistrations[0].status).toBe('CONSULTING')
-      expect(store.todayRegistrations[0].isConfirmed).toBe(true)
     })
 
     it('completeConsult updates status to COMPLETED', async () => {
@@ -259,8 +253,8 @@ describe('Registration Store', () => {
       authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
 
       store.todayRegistrations = [
-        { id: 2, resourceId: 101, resourceName: 'Dr. A', queueNumber: '002', patientId: 101, patientName: 'B', patientTaxId: 'B', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
-        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'A', patientTaxId: 'A', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
+        { id: 2, resourceId: 101, resourceName: 'Dr. A', queueNumber: '002', patientId: 101, patientName: 'B', patientTaxId: 'B', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
+        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'A', patientTaxId: 'A', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
       ]
 
       const next = await store.callNext()
@@ -338,14 +332,138 @@ describe('Registration Store', () => {
     })
   })
 
+  describe('merge-based refresh', () => {
+    it('does not regress local CALLING status to server WAITING', async () => {
+      const store = useRegistrationStore()
+
+      // Local state: patient was just called
+      store.todayRegistrations = [
+        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'CALLING', isConfirmed: false, type: 'WALK_IN' },
+      ]
+
+      // Server still shows WAITING (stale)
+      vi.mocked(registrationApi.listTodayRegistrations).mockResolvedValue([
+        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
+      ])
+
+      await store.loadTodayRegistrations()
+
+      // Should keep CALLING (local rank > server rank)
+      expect(store.todayRegistrations[0].status).toBe('CALLING')
+    })
+
+    it('allows forward progress from server (WAITING → CONSULTING)', async () => {
+      const store = useRegistrationStore()
+
+      store.todayRegistrations = [
+        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
+      ]
+
+      vi.mocked(registrationApi.listTodayRegistrations).mockResolvedValue([
+        { id: 1, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'John', patientTaxId: 'A123', assignDateFrom: '', assignDateTo: '', status: 'CONSULTING', isConfirmed: true, type: 'WALK_IN' },
+      ])
+
+      await store.loadTodayRegistrations()
+
+      expect(store.todayRegistrations[0].status).toBe('CONSULTING')
+    })
+
+    it('adds new server records not in local', async () => {
+      const store = useRegistrationStore()
+      store.todayRegistrations = []
+
+      vi.mocked(registrationApi.listTodayRegistrations).mockResolvedValue([
+        { id: 5, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001', patientId: 100, patientName: 'New', patientTaxId: 'N1', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
+      ])
+
+      await store.loadTodayRegistrations()
+      expect(store.todayRegistrations).toHaveLength(1)
+      expect(store.todayRegistrations[0].patientName).toBe('New')
+    })
+  })
+
+  describe('appointment registration', () => {
+    it('has default registrationType of WALK_IN', () => {
+      const store = useRegistrationStore()
+      expect(store.registrationType).toBe('WALK_IN')
+      expect(store.appointmentDate).toBeNull()
+    })
+
+    it('rejects appointment without date', async () => {
+      const store = useRegistrationStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
+
+      store.currentPatient = { id: 100, value: 'P1', name: 'John', taxId: 'A123', isActive: true }
+      store.selectedDoctor = { id: 101, name: 'Dr. A' }
+      store.registrationType = 'APPOINTMENT'
+      store.appointmentDate = null
+
+      const result = await store.register()
+      expect(result).toBeNull()
+      expect(store.error).toBe('請選擇預約日期')
+    })
+
+    it('auto-resolves org=0 to first non-zero org', async () => {
+      vi.mocked(registrationApi.getNextQueueNumber).mockResolvedValue('001')
+      vi.mocked(registrationApi.createRegistration).mockResolvedValue({
+        id: 999, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001',
+        patientId: 100, patientName: 'John', patientTaxId: 'A123',
+        assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN',
+      })
+
+      const store = useRegistrationStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 0, organizationName: '*', warehouseId: 1, warehouseName: 'WH' }
+      authStore.availableOrgs = [{ id: 0, name: '*' }, { id: 11, name: 'Org1' }]
+
+      store.currentPatient = { id: 100, value: 'P1', name: 'John', taxId: 'A123', isActive: true }
+      store.selectedDoctor = { id: 101, name: 'Dr. A' }
+
+      const result = await store.register()
+      expect(result).not.toBeNull()
+
+      // Verify orgId 11 was used (not 0)
+      const createCall = vi.mocked(registrationApi.createRegistration).mock.calls[0][0]
+      expect(createCall.orgId).toBe(11)
+    })
+
+    it('resets registrationType and appointmentDate after successful register', async () => {
+      vi.mocked(registrationApi.getNextQueueNumber).mockResolvedValue('001')
+      vi.mocked(registrationApi.createRegistration).mockResolvedValue({
+        id: 999, resourceId: 101, resourceName: 'Dr. A', queueNumber: '001',
+        patientId: 100, patientName: 'John', patientTaxId: 'A123',
+        assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN',
+      })
+
+      const store = useRegistrationStore()
+      const { useAuthStore } = await import('../auth')
+      const authStore = useAuthStore()
+      authStore.context = { clientId: 1, clientName: 'Test', roleId: 1, roleName: 'Admin', organizationId: 11, organizationName: 'Org', warehouseId: 1, warehouseName: 'WH' }
+
+      store.currentPatient = { id: 100, value: 'P1', name: 'John', taxId: 'A123', isActive: true }
+      store.selectedDoctor = { id: 101, name: 'Dr. A' }
+      store.registrationType = 'WALK_IN'
+
+      await store.register()
+
+      expect(store.registrationType).toBe('WALK_IN')
+      expect(store.appointmentDate).toBeNull()
+      expect(store.currentPatient).toBeNull()
+      expect(store.selectedDoctor).toBeNull()
+    })
+  })
+
   describe('getters', () => {
     it('filters registrations by status', () => {
       const store = useRegistrationStore()
       store.todayRegistrations = [
-        { id: 1, resourceId: 101, resourceName: '', queueNumber: '1', patientId: 100, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
-        { id: 2, resourceId: 101, resourceName: '', queueNumber: '2', patientId: 101, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'CALLING', isConfirmed: false },
-        { id: 3, resourceId: 101, resourceName: '', queueNumber: '3', patientId: 102, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'CONSULTING', isConfirmed: true },
-        { id: 4, resourceId: 101, resourceName: '', queueNumber: '4', patientId: 103, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'COMPLETED', isConfirmed: true },
+        { id: 1, resourceId: 101, resourceName: '', queueNumber: '1', patientId: 100, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
+        { id: 2, resourceId: 101, resourceName: '', queueNumber: '2', patientId: 101, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'CALLING', isConfirmed: false, type: 'WALK_IN' },
+        { id: 3, resourceId: 101, resourceName: '', queueNumber: '3', patientId: 102, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'CONSULTING', isConfirmed: true, type: 'WALK_IN' },
+        { id: 4, resourceId: 101, resourceName: '', queueNumber: '4', patientId: 103, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'COMPLETED', isConfirmed: true, type: 'WALK_IN' },
       ]
 
       expect(store.waitingList).toHaveLength(1)
@@ -357,9 +475,9 @@ describe('Registration Store', () => {
     it('counts waiting by doctor', () => {
       const store = useRegistrationStore()
       store.todayRegistrations = [
-        { id: 1, resourceId: 101, resourceName: '', queueNumber: '1', patientId: 100, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
-        { id: 2, resourceId: 101, resourceName: '', queueNumber: '2', patientId: 101, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
-        { id: 3, resourceId: 102, resourceName: '', queueNumber: '3', patientId: 102, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false },
+        { id: 1, resourceId: 101, resourceName: '', queueNumber: '1', patientId: 100, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
+        { id: 2, resourceId: 101, resourceName: '', queueNumber: '2', patientId: 101, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
+        { id: 3, resourceId: 102, resourceName: '', queueNumber: '3', patientId: 102, patientName: '', patientTaxId: '', assignDateFrom: '', assignDateTo: '', status: 'WAITING', isConfirmed: false, type: 'WALK_IN' },
       ]
 
       expect(store.waitingCountByDoctor[101]).toBe(2)

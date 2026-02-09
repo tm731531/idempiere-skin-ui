@@ -2,8 +2,9 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRegistrationStore } from '@/stores/registration'
-import { TAG_DISPLAY, type PatientTag } from '@/api/registration'
+import { TAG_DISPLAY, TYPE_DISPLAY, type PatientTag } from '@/api/registration'
 import { readNhiCard, type NhiCard } from '@/api/nhi'
+import { toDateString, maxAppointmentDate, toLocaleDateLabel } from '@/api/utils'
 
 const router = useRouter()
 const store = useRegistrationStore()
@@ -130,7 +131,11 @@ function selectDoctor(doctor: any) {
 async function confirmRegister() {
   const registration = await store.register()
   if (registration) {
-    alert(`掛號成功！\n號碼: ${registration.queueNumber}\n病人: ${registration.patientName}`)
+    const typeLabel = TYPE_DISPLAY[registration.type].label
+    const dateInfo = registration.type === 'APPOINTMENT' && store.appointmentDate
+      ? `\n日期: ${dateLabel.value}`
+      : ''
+    alert(`掛號成功！（${typeLabel}）\n號碼: ${registration.queueNumber}\n病人: ${registration.patientName}${dateInfo}`)
     taxIdInput.value = ''
     showNewPatientForm.value = false
   }
@@ -144,12 +149,35 @@ function clearAll() {
   nameInput.value = ''
   phoneInput.value = ''
   showNewPatientForm.value = false
+  store.registrationType = 'WALK_IN'
+  store.appointmentDate = null
 }
 
-// 可用醫師（有 resourceId 的）
-const availableDoctors = computed(() =>
-  store.doctors.filter(d => d.resourceId)
+// 所有醫師（S_Resource 直接查詢，id 即為 resource ID）
+const availableDoctors = computed(() => store.doctors)
+
+// 預約日期 computed
+const tomorrowStr = computed(() => {
+  const d = new Date()
+  d.setDate(d.getDate() + 1)
+  return toDateString(d)
+})
+const maxDateStr = computed(() => toDateString(maxAppointmentDate()))
+const appointmentDateStr = computed(() =>
+  store.appointmentDate ? toDateString(store.appointmentDate) : ''
 )
+const dateLabel = computed(() =>
+  store.appointmentDate ? toLocaleDateLabel(store.appointmentDate) : ''
+)
+function onDateChange(event: Event) {
+  const val = (event.target as HTMLInputElement).value
+  if (val) {
+    const [y, m, d] = val.split('-').map(Number)
+    store.appointmentDate = new Date(y!, m! - 1, d)
+  } else {
+    store.appointmentDate = null
+  }
+}
 </script>
 
 <template>
@@ -232,9 +260,44 @@ const availableDoctors = computed(() =>
       </div>
     </div>
 
-    <!-- Step 3: 選擇醫師 -->
+    <!-- Step 3: 掛號類型 -->
     <div class="section" v-if="store.currentPatient">
-      <h3>3. 選擇醫師</h3>
+      <h3>3. 掛號類型</h3>
+      <div class="type-toggle">
+        <button
+          class="type-btn"
+          :class="{ active: store.registrationType === 'WALK_IN' }"
+          @click="store.registrationType = 'WALK_IN'; store.appointmentDate = null"
+        >
+          <span class="type-color" :style="{ background: TYPE_DISPLAY['WALK_IN'].color }"></span>
+          {{ TYPE_DISPLAY['WALK_IN'].label }}掛號
+        </button>
+        <button
+          class="type-btn"
+          :class="{ active: store.registrationType === 'APPOINTMENT' }"
+          @click="store.registrationType = 'APPOINTMENT'"
+        >
+          <span class="type-color" :style="{ background: TYPE_DISPLAY['APPOINTMENT'].color }"></span>
+          {{ TYPE_DISPLAY['APPOINTMENT'].label }}掛號
+        </button>
+      </div>
+      <div v-if="store.registrationType === 'APPOINTMENT'" class="date-picker">
+        <label class="date-label">預約日期：</label>
+        <input
+          type="date"
+          class="input"
+          :min="tomorrowStr"
+          :max="maxDateStr"
+          :value="appointmentDateStr"
+          @change="onDateChange"
+        />
+        <span v-if="dateLabel" class="date-hint">{{ dateLabel }}</span>
+      </div>
+    </div>
+
+    <!-- Step 4: 選擇醫師 -->
+    <div class="section" v-if="store.currentPatient">
+      <h3>4. 選擇醫師</h3>
       <div v-if="store.isLoadingDoctors" class="loading">載入中...</div>
       <div v-else-if="availableDoctors.length === 0" class="empty">
         沒有可用的醫師資源，請先在 iDempiere 設定 S_Resource
@@ -249,14 +312,14 @@ const availableDoctors = computed(() =>
         >
           <div class="doctor-name">{{ doctor.name }}</div>
           <div class="doctor-waiting">
-            候診: {{ store.waitingCountByDoctor[doctor.resourceId!] || 0 }} 人
+            候診: {{ store.waitingCountByDoctor[doctor.id] || 0 }} 人
           </div>
         </div>
       </div>
     </div>
 
     <!-- 確認掛號 -->
-    <div class="action-section" v-if="store.currentPatient && store.selectedDoctor">
+    <div class="action-section" v-if="store.currentPatient && store.selectedDoctor && (store.registrationType === 'WALK_IN' || store.appointmentDate)">
       <button
         class="btn btn-success btn-large"
         @click="confirmRegister"
@@ -598,6 +661,69 @@ const availableDoctors = computed(() =>
 .tag-label { font-size: 0.75rem; color: #666; margin-top: 0.25rem; }
 
 .btn-full { width: 100%; }
+
+/* Type toggle */
+.type-toggle {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.type-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 0.5rem;
+  background: white;
+  font-size: 1rem;
+  cursor: pointer;
+  min-height: 48px;
+  transition: all 0.2s;
+}
+
+.type-btn.active {
+  border-color: #333;
+  background: #f5f5f5;
+  font-weight: 600;
+}
+
+.type-btn:active {
+  background: #eee;
+}
+
+.type-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.date-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.date-label {
+  white-space: nowrap;
+  color: #666;
+  font-size: 0.875rem;
+}
+
+.date-picker .input {
+  flex: 1;
+}
+
+.date-hint {
+  white-space: nowrap;
+  color: #2196F3;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
 
 /* NHI card reader */
 .btn-nhi { width: 100%; margin-top: 0.5rem; background: #1565c0; color: white; border-color: #1565c0; padding: 0.75rem; border-radius: 0.5rem; font-size: 1rem; cursor: pointer; min-height: 48px; border: none; }

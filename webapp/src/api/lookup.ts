@@ -62,6 +62,62 @@ export async function lookupDocTypeId(docBaseType: string): Promise<number> {
 }
 
 /**
+ * Lookup C_DocType_ID for Internal Use Inventory.
+ * DocBaseType='MMI' and Name contains 'Internal Use'.
+ */
+export async function lookupInternalUseDocTypeId(): Promise<number> {
+  const cacheKey = 'C_DocType_InternalUse'
+  if (cache[cacheKey] !== undefined) return cache[cacheKey]
+
+  const resp = await apiClient.get('/api/v1/models/C_DocType', {
+    params: {
+      '$filter': "DocBaseType eq 'MMI' and contains(Name,'Internal Use') and IsActive eq true",
+      '$select': 'C_DocType_ID,Name',
+      '$top': 1,
+    },
+  })
+
+  const records = resp.data.records || []
+  const id = records[0]?.id || 0
+  cache[cacheKey] = id
+  return id
+}
+
+/**
+ * Lookup or create C_Charge for clinic dispense (internal use).
+ */
+export async function lookupDispenseChargeId(orgId: number): Promise<number> {
+  const cacheKey = 'C_Charge_Dispense'
+  if (cache[cacheKey] !== undefined) return cache[cacheKey]
+
+  // Try to find existing "Clinic Dispense" charge
+  const resp = await apiClient.get('/api/v1/models/C_Charge', {
+    params: {
+      '$filter': "Name eq 'Clinic Dispense' and IsActive eq true",
+      '$top': 1,
+    },
+  })
+
+  const records = resp.data.records || []
+  if (records.length > 0) {
+    cache[cacheKey] = records[0].id
+    return records[0].id
+  }
+
+  // Create new charge
+  const createResp = await apiClient.post('/api/v1/models/C_Charge', {
+    'AD_Org_ID': orgId,
+    'Name': 'Clinic Dispense',
+    'IsSameTax': false,
+    'IsSameCurrency': true,
+  })
+
+  const id = createResp.data.id
+  cache[cacheKey] = id
+  return id
+}
+
+/**
  * Lookup C_UOM_ID for 'Each' unit.
  * Queries by X12DE355 = 'EA' (ISO standard code for 'Each').
  */
